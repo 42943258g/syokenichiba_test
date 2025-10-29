@@ -1,0 +1,1259 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>商圏市場テスト v2.2.3</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body, #map { height: 100%; margin: 0; }
+    .panel {
+      position: absolute; top: 10px; left: 10px; z-index: 10;
+      width: 460px; max-height: calc(100% - 20px); overflow: auto;
+      background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.15);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif;
+      padding: 12px 14px;
+    }
+    .row { display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid #eee; }
+    .row:last-child { border-bottom:none; }
+    .muted { color:#666; font-size:12px; }
+    .code { font-family: ui-monospace, Consolas, monospace; }
+    .btns { display:flex; gap:8px; margin:8px 0 4px; flex-wrap: wrap; }
+    button { border:1px solid #ddd; background:#fafafa; padding:8px 12px; border-radius:10px; cursor:pointer; transition: all .15s ease; }
+    button:hover { background:#f0f0f0; }
+    button:disabled { opacity:.5; cursor:not-allowed; filter: grayscale(20%); }
+
+    .btn-stop.emph { background: linear-gradient(180deg, #ef4444, #dc2626); color:#fff; border-color:#b91c1c; box-shadow: 0 0 0 2px rgba(239,68,68,.15), 0 8px 18px rgba(220,38,38,.35); }
+    .btn-stop.emph:hover { filter: brightness(1.05); }
+    .btn-stop.emph:active { transform: translateY(1px); }
+    .btn-stop.emph .pulse { display:inline-block; width:8px; height:8px; margin-right:6px; border-radius:999px; background:#fff; animation: pulse 1s ease-in-out infinite; vertical-align: -1px; }
+    @keyframes pulse { 0%{opacity:.55; transform: scale(.9);} 50%{opacity:1; transform: scale(1);} 100%{opacity:.55; transform: scale(.9);} }
+
+    .stack { display:flex; flex-direction:column; gap:8px; margin:8px 0 4px; }
+    .stack input, .stack button, .stack select { width:100%; }
+    .stack input, #budgetInput, #copiesInput, #distInput, #targetAge, #targetAgeMale, #targetAgeFemale, #targetIncome { text-align:right; }
+
+    .hit { background:#ecfdf5; border-color:#10b981!important; box-shadow:0 0 0 2px rgba(16,185,129,.15) inset; }
+    .hitText { color:#059669; font-weight:600; }
+
+    .overlay {
+      position: fixed; inset: 0; background: rgba(255,255,255,.88);
+      display: none; align-items: center; justify-content: center; flex-direction: column;
+      z-index: 9999; backdrop-filter: blur(2px);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    }
+    .spinner { width: 54px; height: 54px; border-radius: 50%; border: 6px solid #e5e7eb; border-top-color: #3b82f6; animation: spin 1s linear infinite; margin-bottom: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress { width: 280px; height: 10px; background:#eef2f7; border-radius: 999px; overflow: hidden; margin-top: 8px; box-shadow: inset 0 0 1px rgba(0,0,0,.08); }
+    .progress > div { height: 100%; width: 0%; background:#3b82f6; transition: width .15s ease; }
+    .overlay .muted { font-size: 12px; color:#6b7280; margin-top:6px; }
+
+    /* 媒体計テーブルの 2～4列（件数・部数合計・料金合計）を右寄せ */
+    #mediaStats table { width: 100%; border-collapse: collapse; }
+    #mediaStats th, #mediaStats td { padding: 4px 8px; }
+    #mediaStats th:nth-child(2),
+    #mediaStats th:nth-child(3),
+    #mediaStats th:nth-child(4),
+    #mediaStats td:nth-child(2),
+    #mediaStats td:nth-child(3),
+    #mediaStats td:nth-child(4) {
+      text-align: right;
+    }
+
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="overlay" class="overlay">
+    <div class="spinner"></div>
+    <div id="overlayTitle" style="font-weight:700;margin-bottom:4px;">初期計算を準備中…</div>
+    <div id="overlayMsg" class="muted">CSVと地図の読み込みを待機中</div>
+    <div class="progress" style="margin-top:12px;"><div id="overlayBar"></div></div>
+    <div id="overlaySub" class="muted"></div>
+  </div>
+
+  <div class="panel">
+    <div><strong>商圏市場テスト v2.2.3</strong></div>
+    <div class="muted">
+      地図を<b>クリックで選択/解除</b>（複数可）。上段は
+      <b>平均年齢</b>・<b>平均年収</b>（中央値推計）、
+      <b>世帯総数 合計</b>、<b>乗用車保有台数 平均</b>（世帯総数で加重平均）を表示。媒体は<b>媒体名別</b>に集計。<br/>
+      <b>基準の町</b>は濃い枠・オレンジ塗り＋中心点で強調。距離目標入力時は基準点中心の<b>半径円</b>を表示。<br/>
+      隣接探索は<b>四隅（bbox）基準</b>で候補を絞り、中心点基準の不利を回避。四隅候補が全て既選択のベースは自動的にスキップします。
+    </div>
+
+    <div class="btns">
+      <button id="clearBtn">全て解除</button>
+      <button id="zoomSelBtn" disabled>選択にズーム</button>
+    </div>
+
+    <div class="stack">
+      <input id="budgetInput" type="text" inputmode="numeric" placeholder="料金目標（万円）"  style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+      <input id="copiesInput" type="text" inputmode="numeric" placeholder="部数目標（万部）"  style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+      <input id="distInput"    type="text" inputmode="numeric" placeholder="距離目標（km）※起点はクリック or 自動決定" style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+    </div>
+
+    <details open>
+      <summary>目標に近づける（年齢・男女年齢・年収） <span class="muted">（未入力なら距離優先で自動選択）</span></summary>
+      <div class="stack">
+        <input id="targetAge"        type="text" inputmode="numeric" placeholder="平均年齢 目標（歳）"        style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+        <input id="targetAgeMale"    type="text" inputmode="numeric" placeholder="男性平均年齢 目標（歳）"    style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+        <input id="targetAgeFemale"  type="text" inputmode="numeric" placeholder="女性平均年齢 目標（歳）"    style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+        <input id="targetIncome"     type="text" inputmode="numeric" placeholder="平均年収 目標（万円）"      style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+      </div>
+    </details>
+
+    <div class="btns">
+      <button id="runAutoBtn">自動選択（目標未入力なら距離優先）</button>
+      <button id="stopBtn" class="btn-stop" disabled>
+        <span class="pulse" style="display:none"></span>自動選択を停止
+      </button>
+    </div>
+    <div id="selectMsg" class="muted"></div>
+
+    <div id="summary" class="row"><span>状態</span><span>CSV読み込み中...</span></div>
+    <div id="topStats"></div>
+
+    <details open>
+      <summary>媒体（媒体名別・選択合計）</summary>
+      <div id="mediaStats"></div>
+    </details>
+
+    <details>
+      <summary>すべての数値列（合計・平均）</summary>
+      <div id="allStats"></div>
+    </details>
+
+    <details>
+      <summary>選択中の町丁目（最大50件を表示）</summary>
+      <div id="picked"></div>
+    </details>
+  </div>
+
+  <script>
+    // ========= 設定 =========
+    const GEOJSON_URL = "./aichi_nearpoint50m_withcode.geojson";
+    const CSV_TOWN    = "./town_master.csv";
+    const CSV_MEDIA   = "./media_master.csv";
+    const CODE_KEY      = "町丁目コード";
+    const POP_TOTAL_KEY = "人口総数";
+    const HH_TOTAL_KEY  = "世帯総数";
+    const CAR_AVG_KEY   = "1世帯あたり乗用車保有台数";
+    const sleep = (ms=0) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // ==== 四隅(bbox)カラム定義（CSV優先） ====
+    const BBOX_KEYS = {
+      minLon: "bbox_min_lon",
+      minLat: "bbox_min_lat",
+      maxLon: "bbox_max_lon",
+      maxLat: "bbox_max_lat",
+    };
+    // CSV由来のbbox / GeoJSON由来のbbox
+    let bboxCsvByCode = new Map();
+    let featureBboxByCode = new Map();
+
+    // ---- フロンティア抑制 ----
+    const SEED_LIMIT   = 200;
+    const MAX_SCAN     = 200;
+
+    // 四隅隣接フィルタ
+    const USE_CORNER_ADJACENCY = true;
+    let cornerAdjCache = new Map();
+
+    // 四隅候補が消尽したベースのキャッシュ（trueのみ保持）
+    let exhaustedCornerBase = new Map();
+
+    // ---- LRU（使っていないシードを優先）----
+    let seedLRU = new Map(); // code -> lastUsedTick
+    let seedTick = 0;
+    function touchSeed(code){ seedLRU.set(String(code), ++seedTick); }
+
+    // ==== 完全リセット ====
+    function resetFrontierCaches() {
+      neighborPtr.clear();
+      neighborCache.clear();
+      cornerAdjCache.clear();
+      exhaustedCornerBase.clear();
+      seedLRU.clear();
+      seedTick = 0;
+    }
+
+    // ========= ユーティリティ =========
+    const $ = (id) => document.getElementById(String(id).replace(/^#/, ''));
+    let allFeatures = [];
+    let lastClickLngLat = null;
+
+    const fixed1 = (x) => (Number.isFinite(Number(x)) ? (Math.round(Number(x)*10)/10).toFixed(1) : "0.0");
+    const fmt    = (v) => (typeof v === "number" && isFinite(v)) ? v.toLocaleString() : (v ?? "");
+    const fmtU   = (v, unit="") => (typeof v === "number" && isFinite(v)) ? `${v.toLocaleString()}${unit}` : (v ?? "");
+    const z2h = (s="") => s.replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0)-0xFEE0)).replace(/[－ー―‐]/g, "-").replace(/[〜～]/g, "～");
+    function distMeters(a, b) {
+      const [lon1, lat1] = a, [lon2, lat2] = b;
+      const toRad = (d) => d * Math.PI / 180;
+      const xm = (lon2 - lon1) * Math.cos(toRad((lat1 + lat2) / 2)) * 111320;
+      const ym = (lat2 - lat1) * 111320;
+      return Math.hypot(xm, ym);
+    }
+
+    const toNumber = (v) => {
+      if (v == null) return 0;
+      const s = String(v).replace(/[^\d.-]/g, "");
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    function formatPreserveDecimals(raw, unit="") {
+      const str = String(raw ?? "");
+      if (!/[0-9]/.test(str)) return str;
+      let cleaned = str.replace(/[^\d.-]/g, "");
+      cleaned = cleaned.replace(/(?!^)-/g, "");
+      const firstDot = cleaned.indexOf(".");
+      if (firstDot !== -1) {
+        cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
+      }
+      const isNeg = cleaned.startsWith("-");
+      const unsigned = isNeg ? cleaned.slice(1) : cleaned;
+      let intPart = unsigned, fracPart = "";
+      const dotIdx = unsigned.indexOf(".");
+      if (dotIdx !== -1) {
+        intPart = unsigned.slice(0, dotIdx);
+        fracPart = unsigned.slice(dotIdx + 1);
+      }
+      const intNum = Number(intPart.replace(/[^\d]/g, "") || "0");
+      const grouped = intNum.toLocaleString();
+      const signed = (isNeg ? "-" : "") + grouped + (fracPart ? "." + fracPart : "");
+      return signed + unit;
+    }
+
+    function setupSmartFormatter(id, unit="", { onCommit } = {}) {
+      const el = document.getElementById(id); if (!el) return;
+      const applyFormat = () => {
+        if (el.value === "") return;
+        el.value = formatPreserveDecimals(el.value, unit);
+        onCommit?.(el.value);
+      };
+      el.addEventListener("focus", () => {
+        const uRe = new RegExp(unit.replace(/([.*+?^=!:${}()|[\]\\/])/g, "\\$1")+"$");
+        const raw = String(el.value).replace(uRe, "");
+        el.value = raw.replace(/,/g, "");
+        setTimeout(() => el.select(), 0);
+      });
+      el.addEventListener("blur", applyFormat);
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter") el.blur(); });
+    }
+
+    // 停止ボタンと自動実行フラグ
+    let STOP = { requested: false };
+    let IS_AUTO_RUNNING = false;
+    function setStopEnabled(on){
+      const b = $("stopBtn"); if (!b) return;
+      b.disabled = !on;
+      b.classList.toggle("emph", !!on);
+      const dot = b.querySelector('.pulse');
+      if (dot) dot.style.display = on ? 'inline-block' : 'none';
+      b.textContent = on ? "" : "自動選択を停止";
+      if (on) { b.insertAdjacentHTML('afterbegin', '<span class="pulse"></span>'); b.appendChild(document.createTextNode('自動選択を停止')); }
+    }
+    function beginAuto(){ IS_AUTO_RUNNING = true; STOP.requested = false; setStopEnabled(true); }
+    function finishAuto(){ IS_AUTO_RUNNING = false; setStopEnabled(false); }
+    function resetStop(){ STOP.requested = false; setStopEnabled(false); }
+
+    $("stopBtn").addEventListener("click", () => {
+      if ($("stopBtn").disabled) return;
+      STOP.requested = true;
+      setStopEnabled(false);
+    });
+
+    // 地理円
+    function circlePolygon(center, radiusMeters, steps=256){
+      const [lon, lat] = center;
+      const coords = [];
+      const rad = Math.PI/180;
+      const cosLat = Math.cos(lat*rad) || 1e-9;
+      for(let i=0;i<=steps;i++){
+        const t = 2*Math.PI*i/steps;
+        const dx = radiusMeters * Math.cos(t);
+        const dy = radiusMeters * Math.sin(t);
+        const dlon = dx / (111320 * cosLat);
+        const dlat = dy / 111320;
+        coords.push([lon + dlon, lat + dlat]);
+      }
+      return { type:"Feature", properties:{}, geometry:{ type:"Polygon", coordinates:[coords] } };
+    }
+
+    // 列検出
+    function z2hBand(label="", fallbackWidth=5) {
+      const t = z2h(label);
+      if (/年齢不詳/.test(t)) return null;
+      let m = t.match(/(男|女)?\s*([0-9]+)\s*～\s*([0-9]+)\s*歳人口/);
+      if (m) return { lo: Number(m[2]), hi: Number(m[3]) };
+      m = t.match(/(男|女)?\s*([0-9]+)\s*歳以上人口/);
+      if (m) return { lo: Number(m[2]), hi: Number(m[2]) + fallbackWidth };
+      return null;
+    }
+    function parseAgeBand(label="", fallbackWidth=5) { return z2hBand(label,fallbackWidth); }
+    function parseIncomeBand(label="", fallbackWidth=200) {
+      const t = z2h(label);
+      let m = t.match(/年収\s*([0-9]+)\s*～\s*([0-9]+)\s*万円未満世帯数/);
+      if (m) return { lo: Number(m[1]), hi: Number(m[2]) };
+      m = t.match(/年収\s*([0-9]+)\s*万円未満世帯数/);
+      if (m) return { lo: 0, hi: Number(m[1]) };
+      m = t.match(/年収\s*([0-9]+)\s*万円以上世帯数/);
+      if (m) return { lo: Number(m[1]), hi: Number(m[1]) + fallbackWidth };
+      return null;
+    }
+    function detectNumericKeys(rows) {
+      if (!rows?.length) return [];
+      const keys = Object.keys(rows[0]);
+      const sample = rows.slice(0, 500);
+      const isNumericish = (v) => {
+        if (v === null || v === undefined || v === "") return true;
+        if (typeof v === "number") return Number.isFinite(v);
+        if (typeof v === "string") {
+          const n = Number(v.replace(/[^\d.-]/g, ""));
+          return Number.isFinite(n);
+        }
+        return false;
+      };
+      return keys.filter(k => {
+        let sawNumeric = false;
+        for (const r of sample) {
+          const v = r[k];
+          if (v === null || v === undefined || v === "") continue;
+          if (!isNumericish(v)) return false;
+          const n = (typeof v === "number") ? v : Number(String(v).replace(/[^\d.-]/g, ""));
+          if (Number.isFinite(n)) sawNumeric = true;
+        }
+        return sawNumeric;
+      });
+    }
+    function detectIncomeWidth(keys) {
+      const widths = {};
+      for (const k of keys) {
+        const b = parseIncomeBand(k, null);
+        if (b && b.hi != null) {
+          const w = b.hi - b.lo;
+          if (w > 0) widths[w] = (widths[w] || 0) + 1;
+        }
+      }
+      let best = null, cnt = -1;
+      for (const w in widths) if (widths[w] > cnt) { cnt = widths[w]; best = Number(w); }
+      return best || 200;
+    }
+
+    // 地図
+    const style = {"version":8,"sources":{"osm":{"type":"raster","tiles":["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],"tileSize":256,"attribution":"© OpenStreetMap contributors"}},"layers":[{"id":"osm","type":"raster","source":"osm"}]};
+    const map = new maplibregl.Map({ container: "map", style, center: [136.8816, 35.1709], zoom: 12 });
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+    // データ
+    let townIndex = null;
+    let mediaIndex = null;
+    let numericKeys = [];
+    let incomeWidthFallback = 200;
+    const selected = new Set();
+    let geojsonBbox = null;
+
+    // 基準の町＆円
+    let baseCode = null, prevBaseCode = null;
+    const centroidOf = (code)=>{ const f = allFeatures.find(x=>x.code===String(code)); return f?.centroid || null; };
+    const bboxOf = (code)=> (bboxCsvByCode.get(String(code)) || featureBboxByCode.get(String(code)) || null);
+    const getMapCenterLngLat = ()=>{ const c = map.getCenter(); return [c.lng, c.lat]; };
+
+    function chooseBaseByPoint(lngLat){
+      if (!Array.isArray(lngLat)) return;
+      let best = null;
+      for (const f of allFeatures){
+        const d = distMeters(lngLat, f.centroid);
+        if (!best || d < best.d) best = { code: String(f.code), d };
+      }
+      if (best) {
+        baseCode = best.code;
+        resetFrontierCaches();
+        updateBaseFeatureState();
+      }
+    }
+    function ensureBaseIfMissing(){
+      if (baseCode) return;
+      if (lastClickLngLat){ chooseBaseByPoint(lastClickLngLat); return; }
+      if (selected.size){ baseCode = String(Array.from(selected)[0]); updateBaseFeatureState(); return; }
+      if (allFeatures.length){ chooseBaseByPoint(getMapCenterLngLat()); }
+    }
+    function updateBaseFeatureState(){
+      try{
+        if (!map.getSource("aichi")) return;
+        if (prevBaseCode && prevBaseCode !== baseCode) {
+          map.setFeatureState({source:"aichi", id:String(prevBaseCode)}, { base:false });
+        }
+        if (baseCode){
+          map.setFeatureState({source:"aichi", id:String(baseCode)}, { base:true, selected: !!selected.has(String(baseCode)) });
+        }
+        prevBaseCode = baseCode;
+        const pt = centroidOf(baseCode||"");
+        map.getSource("base-point")?.setData(pt ? { type:"FeatureCollection", features:[{type:"Feature", geometry:{type:"Point", coordinates: pt}}] }
+                                               : { type:"FeatureCollection", features:[] });
+      }catch(e){ console.warn("updateBaseFeatureState skipped:", e); }
+    }
+    function renderTargetRadius(){
+      const km = toNumber($("distInput").value);
+      const r = Math.round(km * 1000);
+      const center =
+        (lastClickLngLat ? lastClickLngLat : centroidOf(baseCode||"")) || getMapCenterLngLat();
+
+      const fc = { type:"FeatureCollection", features:[] };
+      if (center && r > 0){
+        const feat = circlePolygon(center, r, 256);
+        feat.properties = { label: `半径 ${km.toLocaleString()} km` };
+        fc.features = [ feat ];
+      }
+      map.getSource("target-radius")?.setData(fc);
+    }
+
+    // ローディングUI
+    const overlay = $("overlay"), overlayTitle = $("overlayTitle"), overlayMsg = $("overlayMsg"), overlayBar = $("overlayBar"), overlaySub = $("overlaySub");
+    function showOverlay(title, msg){ overlay.style.display="flex"; overlayTitle.textContent = title||""; overlayMsg.textContent = msg||""; }
+    function hideOverlay(){ overlay.style.display="none"; }
+    function setProgress(p, sub=""){ overlayBar.style.width = `${Math.max(0, Math.min(100, p))}%`; overlaySub.textContent = sub; }
+    showOverlay("初期計算を準備中…", "CSVと地図の読み込みを待機中");
+
+    let readyTown=false, readyMedia=false, readyGeo=false;
+
+    Papa.parse(CSV_TOWN, {
+      header: true, download: true, dynamicTyping: true, encoding: "utf-8",
+      complete: (res) => {
+        const rows = res.data.filter(r => r && r[CODE_KEY] !== undefined && r[CODE_KEY] !== "");
+        townIndex = new Map(rows.map(r => [String(r[CODE_KEY]), r]));
+        numericKeys = detectNumericKeys(rows);
+        incomeWidthFallback = detectIncomeWidth(numericKeys);
+
+        // CSVのbbox取り込み（数値に変換できた行のみ）
+        bboxCsvByCode.clear();
+        for (const r of rows){
+          const code = String(r[CODE_KEY]);
+          const a = Number(r[BBOX_KEYS.minLon]);
+          const b = Number(r[BBOX_KEYS.minLat]);
+          const c = Number(r[BBOX_KEYS.maxLon]);
+          const d = Number(r[BBOX_KEYS.maxLat]);
+          if ([a,b,c,d].every(v => Number.isFinite(v))){
+            bboxCsvByCode.set(code, [[a,b],[c,d]]);
+          }
+        }
+
+        $("summary").innerHTML = `<span>CSV(町)</span><span>読込完了（${rows.length} 件 / bbox ${bboxCsvByCode.size} 件）</span>`;
+        readyTown = true; tryBuildPrecomputedAsync();
+      },
+      error: (err) => { $("summary").innerHTML = `<span>CSV(町)エラー</span><span>${err}</span>`; console.error(err); }
+    });
+
+    Papa.parse(CSV_MEDIA, {
+      header: true, download: true, dynamicTyping: true, encoding: "utf-8",
+      complete: (res) => {
+        const rows = res.data.filter(r => r && r[CODE_KEY] !== undefined && r[CODE_KEY] !== "");
+        mediaIndex = new Map();
+        for (const r of rows) {
+          const code = String(r[CODE_KEY]);
+          if (!mediaIndex.has(code)) mediaIndex.set(code, []);
+          mediaIndex.get(code).push(r);
+        }
+        const prev = $("summary").innerHTML;
+        $("summary").innerHTML = prev.replace("</span></div>", "") + ` / <span>CSV(媒体)読込完了（${rows.length} 行）</span></div>`;
+        readyMedia = true; tryBuildPrecomputedAsync();
+      },
+      error: (err) => {
+        const prev = $("summary").innerHTML;
+        $("summary").innerHTML = prev.replace("</span></div>", "") + ` / <span>CSV(媒体)エラー: ${err}</span></div>`;
+        console.error(err);
+      }
+    });
+
+    map.on("load", async () => {
+      const res = await fetch(GEOJSON_URL);
+      if (!res.ok) { $("summary").innerHTML = `<span>GeoJSON</span><span>読み込み失敗 (${res.status})</span>`; return; }
+      const gj = await res.json();
+
+      (function bbox(g) {
+        let minx= 1e9, miny= 1e9, maxx=-1e9, maxy=-1e9;
+        for (const f of g.features) {
+          const t = f.geometry?.type;
+          const cs = f.geometry?.coordinates || [];
+          const bump = (x,y)=>{ if(x<minx)minx=x; if(y<miny)miny=y; if(x>maxx)maxx=x; if(y>maxy)maxy=y; };
+          if (t==="Polygon")  for (const r of cs) for (const [x,y] of r) bump(x,y);
+          if (t==="MultiPolygon") for (const p of cs) for (const r of p) for (const [x,y] of r) bump(x,y);
+        }
+        geojsonBbox = [[minx,miny],[maxx,maxy]];
+      })(gj);
+
+      map.addSource("aichi", { type: "geojson", data: gj, promoteId: CODE_KEY });
+
+      allFeatures = gj.features.map(f => {
+        const code = String(f.properties?.[CODE_KEY] ?? "");
+        let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+        const t = f.geometry?.type, cs = f.geometry?.coordinates || [];
+        const bump=(x,y)=>{ if(x<minx)minx=x; if(y<miny)miny=y; if(x>maxx)maxx=x; if(y>maxy)maxy=y; };
+        if (t==="Polygon")      for (const r of cs) for (const [x,y] of r) bump(x,y);
+        else if (t==="MultiPolygon") for (const p of cs) for (const r of p) for (const [x,y] of r) bump(x,y);
+        const centroid=[(minx+maxx)/2,(miny+maxy)/2];
+        featureBboxByCode.set(code, [[minx,miny],[maxx,maxy]]);
+        return { code, centroid };
+      });
+
+      // ターゲット円
+      map.addSource("target-radius", { type:"geojson", data:{ type:"FeatureCollection", features:[] } });
+      map.addLayer({ id:"target-radius-halo", type:"line", source:"target-radius",
+        paint:{ "line-color":"#ef4444", "line-width":8, "line-blur":4, "line-opacity":0.45 } }, "osm");
+      map.addLayer({ id:"target-radius-line", type:"line", source:"target-radius",
+        paint:{ "line-color":"#dc2626", "line-width":3.5, "line-dasharray":[2,2], "line-opacity":0.95 }});
+      map.addLayer({ id:"target-radius-fill", type:"fill", source:"target-radius",
+        paint:{ "fill-color":"#fecaca", "fill-opacity":0.28 }});
+      map.addLayer({ id:"target-radius-label", type:"symbol", source:"target-radius",
+        layout:{ "text-field":["get","label"], "text-size":14, "text-allow-overlap": true, "text-anchor":"center" },
+        paint:{ "text-color":"#991b1b", "text-halo-color":"#ffffff", "text-halo-width":2 }});
+
+      // 基準点
+      map.addSource("base-point", { type:"geojson", data:{ type:"FeatureCollection", features:[] } });
+      map.addLayer({ id:"base-point-circle", type:"circle", source:"base-point",
+        paint:{ "circle-radius":6, "circle-color":"#ea580c", "circle-stroke-color":"#fff", "circle-stroke-width":2 }});
+
+      // 町ポリゴン
+      map.addLayer({ id:"aichi-fill", type:"fill", source:"aichi",
+        paint:{ "fill-color":[ "case",
+            ["boolean",["feature-state","base"],false], "#fb923c",
+            ["boolean",["feature-state","selected"],false], "#3b82f6",
+            ["boolean",["feature-state","hover"],false],    "#60a5fa",
+            "#00000000" ],
+          "fill-opacity":[ "case",
+            ["boolean",["feature-state","base"],false], 0.35,
+            ["boolean",["feature-state","selected"],false], 0.55,
+            ["boolean",["feature-state","hover"],false],    0.35,
+            0.0 ] }});
+      map.addLayer({ id:"aichi-line", type:"line", source:"aichi",
+        paint:{ "line-color":[ "case",
+                  ["boolean",["feature-state","base"],false], "#b45309",
+                  ["boolean",["feature-state","selected"],false], "#1e40af",
+                  "#1e3a8a" ],
+                "line-width":[ "case",
+                  ["boolean",["feature-state","base"],false], 2.6,
+                  ["boolean",["feature-state","selected"],false], 1.8,
+                  0.6 ] }});
+
+      let hovered=null;
+      map.on("mousemove","aichi-fill",(e)=>{ const f=e.features?.[0]; if(!f) return;
+        const id=f.id ?? f.properties?.[CODE_KEY];
+        if(hovered && hovered!==id) map.setFeatureState({source:"aichi",id:hovered},{hover:false});
+        hovered=id; map.setFeatureState({source:"aichi",id:hovered},{hover:true});
+      });
+      map.on("mouseleave","aichi-fill",()=>{ if(hovered) map.setFeatureState({source:"aichi",id:hovered},{hover:false}); hovered=null; });
+
+      map.on("click","aichi-fill",(e)=>{ const f=e.features?.[0]; if(!f) return;
+        const code=String(f.properties?.[CODE_KEY]??""); if(!code) return;
+        if(selected.has(code)){ selected.delete(code); map.setFeatureState({source:"aichi",id:code},{selected:false}); }
+        else { selected.add(code); map.setFeatureState({source:"aichi",id:code},{selected:true}); }
+        lastClickLngLat = [e.lngLat.lng, e.lngLat.lat];
+        chooseBaseByPoint(lastClickLngLat);
+        renderTargetRadius();
+        updateAggregates();
+      });
+
+      $("clearBtn").onclick = () => {
+        for (const code of selected) map.setFeatureState({source:"aichi", id: code}, {selected:false});
+        selected.clear();
+        resetFrontierCaches();
+        updateAggregates();
+        if (IS_AUTO_RUNNING) setStopEnabled(true); else resetStop();
+      };
+
+      $("zoomSelBtn").onclick = () => {
+        if (!selected.size) return;
+        let minx= 1e9, miny= 1e9, maxx=-1e9, maxy=-1e9;
+        for (const c of selected){
+          const b = bboxOf(c);
+          if (!b) continue;
+          const [[x1,y1],[x2,y2]] = b;
+          if (x1<minx) minx=x1; if (y1<miny) miny=y1; if (x2>maxx) maxx=x2; if (y2>maxy) maxy=y2;
+        }
+        if (minx<maxx && miny<maxy){
+          map.fitBounds([[minx,miny],[maxx,maxy]], { padding: 40, duration: 500 });
+        }
+      };
+
+      map.on("click",(e)=>{ // 背景クリックでも基準更新
+        lastClickLngLat=[e.lngLat.lng,e.lngLat.lat];
+        chooseBaseByPoint(lastClickLngLat);
+        renderTargetRadius();
+      });
+
+      if (geojsonBbox) map.fitBounds(geojsonBbox, { padding: 40, duration: 700 });
+      readyGeo = true; tryBuildPrecomputedAsync();
+    });
+
+    // フォーマッタ適用
+    setupSmartFormatter("budgetInput",      "万円");
+    setupSmartFormatter("copiesInput",      "万部");
+    setupSmartFormatter("distInput",        "km",   { onCommit: () => renderTargetRadius() });
+    setupSmartFormatter("targetAge",        "歳");
+    setupSmartFormatter("targetAgeMale",    "歳");
+    setupSmartFormatter("targetAgeFemale",  "歳");
+    setupSmartFormatter("targetIncome",     "万円");
+
+    // 事前計算
+    let PRE = new Map();
+    let neighborCache = new Map();
+    let neighborPtr   = new Map();
+
+    async function buildPrecomputedAsync(){
+      showOverlay("初期計算中…", "人口・年齢・年収と媒体の合計を準備しています");
+      setProgress(1, "開始");
+
+      const anyRow = townIndex?.values()?.next()?.value || {};
+      const incomeWidth = detectIncomeWidth(Object.keys(anyRow||{}));
+
+      const mediaYBy = new Map(), mediaCBy = new Map();
+      for (const [code, rows] of mediaIndex.entries()){
+        let y=0, c=0; for (const r of rows){ y += toNumber(r["料金"]); c += toNumber(r["部数"]); }
+        mediaYBy.set(code, y); mediaCBy.set(code, c);
+      }
+
+      PRE.clear();
+      const N = allFeatures.length;
+      const CHUNK = 300;
+      for (let i=0;i<N;i+=CHUNK){
+        const end = Math.min(i+CHUNK, N);
+        for (let j=i;j<end;j++){
+          const f = allFeatures[j];
+          const code = String(f.code);
+          const r = townIndex.get(code);
+          if (!r) continue;
+
+          const AGE_WIDTH = 5;
+          let ageW=0, ageN=0, maleW=0, maleN=0, femaleW=0, femaleN=0;
+          for (const [k,v] of Object.entries(r)){
+            const band = parseAgeBand(k, AGE_WIDTH); if (!band) continue;
+            const mid = (band.lo + band.hi)/2, n = Number(v)||0;
+            ageW += mid*n; ageN += n;
+            const t = z2h(k);
+            if (/^男/.test(t)){ maleW += mid*n; maleN += n; }
+            else if (/^女/.test(t)){ femaleW += mid*n; femaleN += n; }
+          }
+          let incW=0, incN=0;
+          for (const [k,v] of Object.entries(r)){
+            const band = parseIncomeBand(k, incomeWidth); if (!band) continue;
+            const mid = (band.lo + band.hi)/2, n = Number(v)||0;
+            incW += mid*n; incN += n;
+          }
+
+          PRE.set(code, {
+            ageW, ageN, maleW, maleN, femaleW, femaleN,
+            incW, incN,
+            yen: mediaYBy.get(code)||0,
+            cps: mediaCBy.get(code)||0,
+            centroid: f.centroid
+          });
+        }
+        const pct = Math.round(((end) / N) * 100);
+        setProgress(pct, `町丁目 ${end}/${N} を処理`);
+        await sleep(0);
+      }
+
+      neighborCache.clear(); neighborPtr.clear();
+      setProgress(100, "完了");
+      overlayMsg.textContent = "初期計算が完了しました";
+      setTimeout(hideOverlay, 250);
+
+      ensureBaseIfMissing();
+      renderTargetRadius();
+      updateBaseFeatureState();
+    }
+
+    function tryBuildPrecomputedAsync(){
+      if (readyTown && readyMedia && readyGeo){
+        buildPrecomputedAsync().catch(e=>{
+          console.error(e);
+          overlayMsg.textContent = "初期計算でエラーが発生しました";
+        });
+      }
+    }
+
+    // ---- 四隅隣接ユーティリティ ----
+    function pointInBbox(pt, bbox) {
+      const [x, y] = pt;
+      const [[minx, miny],[maxx, maxy]] = bbox;
+      return x >= minx && x <= maxx && y >= miny && y <= maxy;
+    }
+    function cornersOfBbox(bbox) {
+      const [[minx, miny],[maxx, maxy]] = bbox;
+      return [
+        [minx, miny], [minx, maxy],
+        [maxx, miny], [maxx, maxy]
+      ];
+    }
+    function hasCornerInsideBase(candidateBbox, baseBbox) {
+      const cs = cornersOfBbox(candidateBbox);
+      for (const p of cs) if (pointInBbox(p, baseBbox)) return true;
+      return false;
+    }
+    function getCornerAdjacentList(baseCode) {
+      const k = String(baseCode);
+      if (cornerAdjCache.has(k)) return cornerAdjCache.get(k);
+      const baseBbox = bboxOf(k);
+      const result = [];
+      if (!baseBbox) { cornerAdjCache.set(k, result); return result; }
+      for (const f of allFeatures) {
+        const c = String(f.code);
+        if (c === k) continue;
+        const bb = bboxOf(c);
+        if (!bb) continue;
+        if (hasCornerInsideBase(bb, baseBbox)) result.push(c);
+      }
+      cornerAdjCache.set(k, result);
+      return result;
+    }
+
+    // 追加：四隅候補がすべて既選択かどうか
+    function isCornerExhausted(code){
+      if (!USE_CORNER_ADJACENCY) return false;
+      const k = String(code);
+      if (exhaustedCornerBase.get(k)) return true; // 既に確定
+      const cand = getCornerAdjacentList(k);
+      if (cand.length === 0){
+        exhaustedCornerBase.set(k, true);
+        return true;
+      }
+      for (const c of cand){
+        if (!selected.has(String(c))){
+          return false; // 1つでも未選択がある
+        }
+      }
+      exhaustedCornerBase.set(k, true); // すべて既選択
+      return true;
+    }
+
+    // 距離キャッシュ
+    function getDistanceSortedList(origin){
+      const arr = allFeatures.map(f => {
+        const p = PRE.get(String(f.code));
+        return { code: f.code, d: distMeters(origin, f.centroid), cost: p ? p.yen : 0, cps: p ? p.cps : 0 };
+      });
+      arr.sort((a,b)=>a.d-b.d);
+      return arr;
+    }
+
+    // 近傍（四隅フィルタ対応）
+    function getNeighborList(code){
+      // 消尽ベースは即座に空
+      if (isCornerExhausted(code)) {
+        neighborCache.set(code, []);
+        neighborPtr.set(code, 0);
+        return [];
+      }
+
+      let candidates = null;
+      if (USE_CORNER_ADJACENCY) {
+        const arr = getCornerAdjacentList(code);
+        if (arr.length === 0) {
+          neighborCache.set(code, []); neighborPtr.set(code, 0);
+          return [];
+        }
+        candidates = new Set(arr);
+      }
+
+      if (neighborCache.has(code)) return neighborCache.get(code);
+      const c0 = centroidOf(code); if (!c0) return [];
+      const arr = [];
+      const pool = candidates ? [...candidates] : allFeatures.map(f => String(f.code));
+      for (const c of pool){
+        if (String(c) === String(code)) continue;
+        const p = PRE.get(String(c));
+        const d = distMeters(c0, (p?.centroid || centroidOf(c)));
+        arr.push({code:String(c), d});
+      }
+      arr.sort((a,b)=>a.d-b.d);
+      neighborCache.set(code, arr);
+      neighborPtr.set(code, 0);
+      return arr;
+    }
+    function nearestUnpickedFast(fromCode, excludeSet){
+      if (isCornerExhausted(fromCode)) return null;
+
+      const list = getNeighborList(fromCode);
+      let i = neighborPtr.get(fromCode) || 0;
+      let scanned = 0;
+      while (i < list.length && excludeSet.has(list[i].code)) {
+        i++; scanned++;
+        if (scanned > MAX_SCAN) { neighborPtr.set(fromCode, i); return null; }
+      }
+      neighborPtr.set(fromCode, i);
+      if (i < list.length) {
+        // 候補を供給できたベースをLRU更新
+        touchSeed(fromCode);
+        return list[i];
+      }
+      return null;
+    }
+
+    // 目標抽出
+    function getTargets(){
+      const toNum = (id) => { const v = toNumber(document.getElementById(id)?.value); return (v && isFinite(v)) ? v : null; };
+      return { age: toNum("targetAge"), male: toNum("targetAgeMale"), female: toNum("targetAgeFemale"), income: toNum("targetIncome") };
+    }
+    function anyTargetEntered(t){ return [t.age, t.male, t.female, t.income].some(v => v!=null); }
+    function lossFromAgg(agg, targets){
+      const avgAge       = agg.ageN    ? agg.ageW/agg.ageN       : 0;
+      const avgAgeMale   = agg.maleN   ? agg.maleW/agg.maleN     : 0;
+      const avgAgeFemale = agg.femaleN ? agg.femaleW/agg.femaleN : 0;
+      const avgIncome    = agg.incN    ? agg.incW/agg.incN       : 0; // 万円
+      const S = { age:5, male:5, female:5, income:50 };
+      const W = { age:1.0, male:0.7, female:0.7, income:1.2 };
+      let loss=0, used=0;
+      if (targets.age!=null){    loss += W.age    * ((avgAge       - targets.age   )/S.age   )**2; used++; }
+      if (targets.male!=null){   loss += W.male   * ((avgAgeMale   - targets.male  )/S.male  )**2; used++; }
+      if (targets.female!=null){ loss += W.female * ((avgAgeFemale - targets.female)/S.female)**2; used++; }
+      if (targets.income!=null){ loss += W.income * ((avgIncome    - targets.income)/S.income)**2; used++; }
+      return used? loss/used : Infinity;
+    }
+
+    // 距離優先
+    async function runDistanceFirst(){
+      const targetYen    = Math.round(toNumber($("budgetInput").value) * 10000);
+      const targetCopies = Math.round(toNumber($("copiesInput").value) * 10000);
+      const targetDist   = Math.round(toNumber($("distInput").value)   * 1000);
+
+      const $out = $("selectMsg");
+      if (!(PRE.size)) { $out.textContent = "初期計算の完了を待っています。"; return; }
+      if (!(targetYen > 0 || targetCopies > 0 || targetDist > 0)) { $out.textContent = "少なくとも1つの目標（料金・部数・距離）を入力してください。"; return; }
+
+      ensureBaseIfMissing();
+      updateBaseFeatureState();
+      renderTargetRadius();
+
+      beginAuto();
+      try {
+        let totalYen = 0, totalCps = 0;
+        for (const c of selected){
+          const p = PRE.get(String(c));
+          if (p){ totalYen += p.yen; totalCps += p.cps; }
+        }
+        let picked = selected.size;
+
+        const origin = lastClickLngLat ?? centroidOf(baseCode||"") ?? getMapCenterLngLat();
+        const rankedAll = getDistanceSortedList(origin);
+        let ranked = rankedAll.filter(r => !selected.has(String(r.code)));
+        let hadDistFilter = false, hasOutside = false;
+        if (targetDist > 0) {
+          hadDistFilter = true;
+          const within = rankedAll.filter(r => r.d <= targetDist && !selected.has(String(r.code)));
+          hasOutside = within.length < ranked.length;
+          ranked = within;
+        }
+
+        let stoppedBy = null;
+        if (targetYen>0 && totalYen >= targetYen) stoppedBy = 'yen';
+        if (!stoppedBy && targetCopies>0 && totalCps >= targetCopies) stoppedBy = 'copies';
+
+        let step=0;
+        for (const r of ranked) {
+          if (stoppedBy) break;
+          if (STOP.requested) { stoppedBy = 'stop'; break; }
+          const p = PRE.get(String(r.code));
+          const nextYen = totalYen + (p?.yen||0), nextCps = totalCps + (p?.cps||0);
+          if (targetYen > 0 && nextYen > targetYen) { stoppedBy = 'yen'; break; }
+          if (targetCopies > 0 && nextCps > targetCopies) { stoppedBy = 'copies'; break; }
+
+          selected.add(String(r.code));
+          map.setFeatureState({source:"aichi", id: String(r.code)}, {selected:true});
+          totalYen = nextYen; totalCps = nextCps; picked++;
+
+          if ((++step % 20) === 0) { updateAggregates(); await sleep(0); }
+        }
+        if (!stoppedBy && hadDistFilter && ranked.length===0 && hasOutside) stoppedBy='dist';
+        updateAggregates();
+
+        const totalYen10k    = Math.round(totalYen / 10000);
+        const totalCopies10k = Math.round(totalCps / 10000);
+        const yenHit    = (targetYen > 0    && (stoppedBy === 'yen'    || totalYen >= targetYen));
+        const copiesHit = (targetCopies > 0 && (stoppedBy === 'copies' || totalCps >= targetCopies));
+        const distHit   = (targetDist > 0   &&  stoppedBy === 'dist');
+        $("budgetInput")?.classList.toggle("hit", yenHit);
+        $("copiesInput")?.classList.toggle("hit", copiesHit);
+        $("distInput")?.classList.toggle("hit", distHit);
+
+        const parts = [];
+        parts.push(`町数 ${picked}件`);
+        if (targetYen > 0)    parts.push(`<span class="${yenHit ? 'hitText' : ''}">料金 ${totalYen10k.toLocaleString()} / 目標 ${(targetYen/10000|0).toLocaleString()} 万円</span>`);
+        if (targetCopies > 0) parts.push(`<span class="${copiesHit ? 'hitText' : ''}">部数 ${totalCopies10k.toLocaleString()} / 目標 ${(targetCopies/10000|0).toLocaleString()} 万部</span>`);
+        if (targetDist > 0)   parts.push(`<span class="${distHit ? 'hitText' : ''}">半径 ${(targetDist/1000|0).toLocaleString()} km内（追加分の探索）</span>`);
+        $out.innerHTML = `自動選択（距離優先）: ${parts.join(" | ")}${stoppedBy ? ` / 停止理由: ${stoppedBy}` : ""}`;
+      } finally {
+        finishAuto();
+      }
+    }
+
+    // 目標近似（LRUスケジュール）
+    function getInitialSeeds(allowedInRadius){
+      const baseStr = baseCode ? String(baseCode) : null;
+      const pass = (s)=> (!allowedInRadius || allowedInRadius.has(s)) && !isCornerExhausted(s);
+      // プール作成（基準以外）
+      const pool = [];
+      for (const c of selected){
+        const s = String(c);
+        if (s === baseStr) continue;
+        if (!pass(s)) continue;
+        const t = seedLRU.get(s) ?? -1; // 未使用ほど優先
+        pool.push({ code: s, t });
+      }
+      // LRU順（tが小さい＝長らく使っていない）に並べる
+      pool.sort((a,b)=> a.t - b.t);
+
+      const room = SEED_LIMIT - (baseStr ? 1 : 0);
+      const arr = pool.slice(0, Math.max(0, room)).map(x=>x.code);
+
+      // 基準ベースは常に先頭（使えるなら）
+      return (baseStr && pass(baseStr)) ? [baseStr, ...arr] : arr;
+    }
+
+    async function runGrowToTargets(){
+      resetFrontierCaches();
+
+      const msg = $("selectMsg");
+      const targets = getTargets();
+      const targetYen    = Math.round(toNumber($("budgetInput").value) * 10000);
+      const targetCopies = Math.round(toNumber($("copiesInput").value) * 10000);
+      const targetDist   = Math.round(toNumber($("distInput").value) * 1000);
+
+      if (!townIndex || !allFeatures.length || !PRE.size){ msg.textContent = "初期計算の完了を待っています。"; return; }
+      if (![targets.age, targets.male, targets.female, targets.income].some(v => v!=null)){
+        msg.textContent = "少なくとも1つの目標（年齢・男女年齢・年収）を入力してください。"; return;
+      }
+
+      ensureBaseIfMissing();
+      updateBaseFeatureState();
+      renderTargetRadius();
+
+      beginAuto();
+      try {
+        $("budgetInput")?.classList.remove("hit"); $("copiesInput")?.classList.remove("hit"); $("distInput")?.classList.remove("hit");
+
+        // 既存選択の合計
+        let agg = { ageW:0, ageN:0, maleW:0, maleN:0, femaleW:0, femaleN:0, incW:0, incN:0 };
+        let totalYen = 0, totalCps = 0;
+        for (const c of selected){
+          const p = PRE.get(String(c)); if (!p) continue;
+          agg.ageW += p.ageW; agg.ageN += p.ageN;
+          agg.maleW += p.maleW; agg.maleN += p.maleN;
+          agg.femaleW += p.femaleW; agg.femaleN += p.femaleN;
+          agg.incW += p.incW; agg.incN += p.incN;
+          totalYen += p.yen; totalCps += p.cps;
+        }
+
+        const centerForRadius = lastClickLngLat ?? centroidOf(baseCode||"") ?? getMapCenterLngLat();
+        let allowedInRadius = null;
+        if (targetDist > 0 && centerForRadius){
+          allowedInRadius = new Set();
+          for (const f of allFeatures){
+            const p = PRE.get(String(f.code)); if (!p) continue;
+            if (distMeters(centerForRadius, p.centroid) <= targetDist) allowedInRadius.add(String(f.code));
+          }
+        }
+        const inRadiusFast = (code) => !allowedInRadius || allowedInRadius.has(String(code));
+
+        // 起点（選択ゼロのとき）— 必ず「基準の町」起点で開始
+        if (selected.size === 0) {
+          const baseStr = baseCode ? String(baseCode) : null;
+          const baseOK  = baseStr && inRadiusFast(baseStr);
+
+          const pickNearestInRadiusTo = (lngLat) => {
+            let best = null;
+            for (const f of allFeatures) {
+              const code = String(f.code);
+              if (selected.has(code)) continue;
+              if (!inRadiusFast(code)) continue;
+              const p = PRE.get(code); if (!p) continue;
+              const d = distMeters(lngLat, p.centroid);
+              if (!best || d < best.d) best = { code, d };
+            }
+            return best?.code || null;
+          };
+
+          let firstCode = null;
+          if (baseOK) {
+            firstCode = baseStr;
+          } else {
+            const anchor = lastClickLngLat ?? (baseStr ? (PRE.get(baseStr)?.centroid) : null) ?? getMapCenterLngLat();
+            firstCode = pickNearestInRadiusTo(anchor);
+          }
+
+          if (!firstCode) {
+            let best = null;
+            for (const f of allFeatures) {
+              const code = String(f.code);
+              if (!inRadiusFast(code)) continue;
+              const p = PRE.get(code); if (!p) continue;
+              const nextAgg = {
+                ageW: agg.ageW + p.ageW, ageN: agg.ageN + p.ageN,
+                maleW: agg.maleW + p.maleW, maleN: agg.maleN + p.maleN,
+                femaleW: agg.femaleW + p.femaleW, femaleN: agg.femaleN + p.femaleN,
+                incW: agg.incW + p.incW, incN: agg.incN + p.incN
+              };
+              const L = lossFromAgg(nextAgg, targets);
+              const anchor = lastClickLngLat ?? centroidOf(baseCode||"") ?? getMapCenterLngLat();
+              const d = distMeters(anchor, p.centroid);
+              if (!best || L < best.L || (L === best.L && d < best.d)) best = { code, L, d, nextAgg };
+            }
+            if (best) firstCode = best.code;
+          }
+
+          if (!firstCode) { msg.textContent = "半径内に候補が見つかりませんでした。"; finishAuto(); return; }
+
+          selected.add(firstCode);
+          const p0 = PRE.get(firstCode);
+          agg = {
+            ageW: agg.ageW + p0.ageW, ageN: agg.ageN + p0.ageN,
+            maleW: agg.maleW + p0.maleW, maleN: agg.maleN + p0.maleN,
+            femaleW: agg.femaleW + p0.femaleW, femaleN: agg.femaleN + p0.femaleN,
+            incW: agg.incW + p0.incW, incN: agg.incN + p0.incN
+          };
+          totalYen += p0.yen; totalCps += p0.cps;
+          map.setFeatureState({source:"aichi", id:firstCode}, {selected:true});
+          // LRUエントリ（まだ未使用なので古め扱い）
+          if (!seedLRU.has(firstCode)) seedLRU.set(firstCode, -1);
+
+          if (!baseStr) { baseCode = String(firstCode); updateBaseFeatureState(); renderTargetRadius(); }
+
+          updateAggregates(); await sleep(0);
+        }
+
+        // フロンティア：LRU順で並べる
+        let order = getInitialSeeds(allowedInRadius);
+
+        let stoppedBy = null;
+        let step = 0;
+
+        while (true){
+          if (STOP.requested){ stoppedBy = 'stop'; break; }
+          if (targetYen>0 && totalYen >= targetYen){ stoppedBy='yen'; break; }
+          if (targetCopies>0 && totalCps >= targetCopies){ stoppedBy='copies'; break; }
+
+          const frontier = new Map();
+          for (const base of order){
+            if (isCornerExhausted(base)) continue;
+            const n = nearestUnpickedFast(base, selected);
+            if (n) frontier.set(n.code, n);
+          }
+          if (frontier.size === 0) { stoppedBy = 'no-candidate'; break; }
+
+          const list = [...frontier.values()];
+          const cand = allowedInRadius ? list.filter(x => allowedInRadius.has(String(x.code))) : list;
+          if (allowedInRadius && cand.length === 0){ stoppedBy = 'dist'; break; }
+
+          let best=null;
+          const candidates = cand.length ? cand : list;
+          for (const c of candidates){
+            const code = String(c.code);
+            if (selected.has(code)) continue;
+            const p = PRE.get(code); if (!p) continue;
+
+            const nextY = totalYen + p.yen, nextC = totalCps + p.cps;
+            if ((targetYen>0 && nextY>targetYen) || (targetCopies>0 && nextC>targetCopies)) continue;
+
+            const nextAgg = {
+              ageW: agg.ageW + p.ageW, ageN: agg.ageN + p.ageN,
+              maleW: agg.maleW + p.maleW, maleN: agg.maleN + p.maleN,
+              femaleW: agg.femaleW + p.femaleW, femaleN: agg.femaleN + p.femaleN,
+              incW: agg.incW + p.incW, incN: agg.incN + p.incN
+            };
+            const L = lossFromAgg(nextAgg, targets);
+            if (!best || L < best.L || (L===best.L && c.d < best.d)) best = { code, L, d:c.d, nextAgg, nextY, nextC };
+          }
+
+          if (!best){
+            stoppedBy = (targetYen>0||targetCopies>0) ? 'budget/copies' : (allowedInRadius ? 'dist' : 'no-candidate');
+            break;
+          }
+
+          selected.add(best.code);
+          agg = best.nextAgg;
+          totalYen = best.nextY; totalCps = best.nextC;
+          map.setFeatureState({source:"aichi", id: best.code}, {selected:true});
+          // 新シードもLRUに登録（まだ未使用なので古め扱い）
+          if (!seedLRU.has(best.code)) seedLRU.set(best.code, -1);
+
+          // 次ターンの並び替え（毎ターンLRUで再計算）
+          order = getInitialSeeds(allowedInRadius);
+
+          step++;
+          if ((step % 50) === 0){ updateAggregates(); await sleep(0); }
+        }
+        updateAggregates();
+
+        const sAvgAge       = agg.ageN    ? agg.ageW/agg.ageN       : 0;
+        const sAvgAgeMale   = agg.maleN   ? agg.maleW/agg.maleN     : 0;
+        const sAvgAgeFemale = agg.femaleN ? agg.femaleW/agg.femaleN : 0;
+        const sAvgIncome    = agg.incN    ? agg.incW/agg.incN       : 0;
+
+        const parts = [];
+        parts.push(`選択 ${selected.size}件`);
+        parts.push(`平均年齢 ${fixed1(sAvgAge)}歳`);
+        parts.push(`男性 ${fixed1(sAvgAgeMale)}歳 / 女性 ${fixed1(sAvgAgeFemale)}歳`);
+        parts.push(`平均年収 ${fixed1(sAvgIncome)}万円`);
+
+        const totalYen10k    = Math.round(totalYen / 10000);
+        const totalCopies10k = Math.round(totalCps / 10000);
+
+        const yenHit    = (targetYen>0 && stoppedBy==='yen');
+        const copiesHit = (targetCopies>0 && stoppedBy==='copies');
+        const distHit   = (targetDist>0 && stoppedBy==='dist');
+        $("budgetInput")?.classList.toggle("hit", yenHit);
+        $("copiesInput")?.classList.toggle("hit", copiesHit);
+        $("distInput")?.classList.toggle("hit", distHit);
+
+        const tail = [];
+        if (targetYen>0)    tail.push(`<span class="${yenHit ? 'hitText' : ''}">料金 ${totalYen10k.toLocaleString()} / 目標 ${(targetYen/10000|0).toLocaleString()} 万円</span>`);
+        if (targetCopies>0) tail.push(`<span class="${copiesHit ? 'hitText' : ''}">部数 ${totalCopies10k.toLocaleString()} / 目標 ${(targetCopies/10000|0).toLocaleString()} 万部</span>`);
+        if (targetDist>0)   tail.push(`<span class="${distHit ? 'hitText' : ''}">半径 ${(targetDist/1000|0).toLocaleString()} km内</span>`);
+
+        msg.innerHTML = `自動選択（目標近似）: ${parts.join(" | ")}${tail.length? " | " + tail.join(" | ") : ""}${stoppedBy ? ` / 停止理由: ${stoppedBy}` : ""}`;
+      } finally {
+        finishAuto();
+      }
+    }
+
+    // 実行ボタン
+    document.getElementById("runAutoBtn").addEventListener("click", async () => {
+      const t = getTargets();
+      if (!anyTargetEntered(t)) {
+        await runDistanceFirst();
+      } else {
+        await runGrowToTargets();
+      }
+      renderTargetRadius();
+      updateBaseFeatureState();
+    });
+
+    // 集計
+    function updateAggregates() {
+      const count = selected.size;
+      const codes = Array.from(selected).map(String);
+      const zb = document.getElementById('zoomSelBtn'); if (zb) zb.disabled = count === 0;
+
+      if (!townIndex) {
+        $("summary").innerHTML = `<span>選択</span><span>${count} 件（CSV準備中）</span>`;
+        $("topStats").innerHTML = ""; $("allStats").innerHTML = ""; $("picked").innerHTML = ""; $("mediaStats").innerHTML = "";
+        return;
+      }
+      const rows = codes.map(c => townIndex.get(c)).filter(Boolean);
+      $("summary").innerHTML = `<span>選択</span><span>${count} 件</span>`;
+
+      const numericKeysHere = detectNumericKeys(rows.length ? [rows[0]] : []);
+      const sums = {}; for (const k of numericKeysHere) sums[k] = 0;
+      for (const r of rows) for (const k of numericKeysHere) sums[k] += Number(r[k]) || 0;
+      const avgs = {}; for (const k of numericKeysHere) avgs[k] = count ? (sums[k] / count) : 0;
+
+      // 年齢・年収
+      let ageWeighted = 0, agePeople = 0, maleWeighted = 0, malePeople = 0, femaleWeighted = 0, femalePeople = 0;
+      const AGE_WIDTH = 5;
+      for (const r of rows) for (const [k, v] of Object.entries(r)) {
+        const band = parseAgeBand(k, AGE_WIDTH); if (!band) continue;
+        const mid = (band.lo + band.hi) / 2, n = Number(v) || 0;
+        ageWeighted += mid * n; agePeople += n;
+        const t = z2h(k);
+        if (/^男/.test(t)) { maleWeighted += mid * n; malePeople += n; }
+        else if (/^女/.test(t)) { femaleWeighted += mid * n; femalePeople += n; }
+      }
+      const avgAge       = agePeople   ? (ageWeighted   / agePeople)   : 0;
+      const avgAgeMale   = malePeople  ? (maleWeighted  / malePeople)  : 0;
+      const avgAgeFemale = femalePeople? (femaleWeighted / femalePeople): 0;
+
+      let incWeighted = 0, incCount = 0;
+      const incomeWidth = detectIncomeWidth(Object.keys(rows[0] || {}));
+      for (const r of rows) for (const [k, v] of Object.entries(r)) {
+        const band = parseIncomeBand(k, incomeWidth); if (!band) continue;
+        const mid = (band.lo + band.hi) / 2, n = Number(v) || 0;
+        incWeighted += mid * n; incCount += n;
+      }
+      const avgIncomeManYen = incCount ? (incWeighted / incCount) : 0;
+
+      let hhTotal = 0, carWeighted = 0, carDen = 0;
+      for (const r of rows) { const hh = Number(r[HH_TOTAL_KEY]) || 0; hhTotal += hh;
+        const carAvg = Number(r[CAR_AVG_KEY]); if (isFinite(carAvg)) { carWeighted += carAvg * hh; carDen += hh; } }
+      const carAvgWeighted = carDen ? (carWeighted / carDen) : 0;
+      const popTotal = rows.reduce((a,r)=> a + (Number(r[POP_TOTAL_KEY])||0), 0);
+
+      const topRows = [];
+      topRows.push(["平均年齢（中央値推計）",        `${fixed1(avgAge)}歳`]);
+      topRows.push(["男性平均年齢（中央値推計）",      `${fixed1(avgAgeMale)}歳`]);
+      topRows.push(["女性平均年齢（中央値推計）",      `${fixed1(avgAgeFemale)}歳`]);
+      topRows.push(["平均年収（中央値推計）",        `${fixed1(avgIncomeManYen)}万円`]);
+      topRows.push(["人口総数 合計",                 fmtU(popTotal, "人")]);
+      topRows.push(["世帯総数 合計",                 fmtU(hhTotal, "世帯")]);
+      topRows.push(["乗用車保有台数 平均（世帯加重）", `${Number(carAvgWeighted.toFixed(3)).toLocaleString()}台`]);
+      $("topStats").innerHTML = topRows.map(([k,v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join("");
+
+      // 媒体
+      let mediaRows = [];
+      if (mediaIndex) for (const c of codes) { const arr = mediaIndex.get(c); if (arr && arr.length) mediaRows = mediaRows.concat(arr); }
+      if (mediaRows.length) {
+        const byName = new Map();
+        for (const r of mediaRows) {
+          const name = r["媒体名"] ?? "(名称不明)";
+          const bu   = toNumber(r["部数"]);
+          const ry   = toNumber(r["料金"]);
+          if (!byName.has(name)) byName.set(name, {件数:0, 部数:0, 料金:0});
+          const o = byName.get(name);
+          o.件数 += 1; o.部数 += bu; o.料金 += ry;
+        }
+        const sorted = Array.from(byName.entries()).sort((a,b) => b[1].料金 - a[1].料金);
+
+        let totalBu = 0, totalRy = 0, totalN = 0;
+        const rowsHtml = sorted.map(([name, o]) => {
+          totalN += o.件数; totalBu += o.部数; totalRy += o.料金;
+          return `<tr>
+            <td>${name}</td>
+            <td>${fmtU(o.件数, "件")}</td>
+            <td>${fmtU(Math.round(o.部数), "部")}</td>
+            <td>${fmtU(Math.round(o.料金), "円")}</td>
+          </tr>`;
+        }).join("");
+
+        $("mediaStats").innerHTML = `
+          <table>
+            <thead><tr><th>媒体名</th><th>件数</th><th>部数 合計</th><th>料金 合計</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+            <tfoot>
+              <tr>
+                <th>合計</th>
+                <th>${fmtU(totalN, "件")}</th>
+                <th>${fmtU(Math.round(totalBu), "部")}</th>
+                <th>${fmtU(Math.round(totalRy), "円")}</th>
+              </tr>
+            </tfoot>
+          </table>`;
+      } else { $("mediaStats").innerHTML = "（選択範囲に媒体データがありません）"; }
+
+      // 全数値列（合計・平均）
+      const numericKeysHere2 = detectNumericKeys(rows.length ? [rows[0]] : []);
+      if (numericKeysHere2.length) {
+        const unitMap = { [POP_TOTAL_KEY]:"人", [HH_TOTAL_KEY]:"世帯", [CAR_AVG_KEY]:"台" };
+        const body = numericKeysHere2.map(k => `<tr><td>${k}</td><td>${fmtU(sums[k], unitMap[k]||"")}</td><td>${fmtU(avgs[k], unitMap[k]||"")}</td></tr>`).join("");
+        $("allStats").innerHTML = `<table><thead><tr><th>項目</th><th>合計</th><th>平均</th></tr></thead><tbody>${body}</tbody></table>`;
+      } else { $("allStats").innerHTML = "（数値列が検出できませんでした）"; }
+
+      const list = rows.slice(0, 50).map(r => {
+        const name = `${r["市区町村名"] ?? ""} ${r["町丁目名"] ?? ""}`.trim();
+        return `<div class="row"><span>${name}</span><span class="code">${r[CODE_KEY]}</span></div>`;
+      }).join("");
+      $("picked").innerHTML = list || "（未選択）";
+
+      ensureBaseIfMissing();
+      updateBaseFeatureState();
+    }
+
+    ["distInput"].forEach(id => {
+      const el = $(id);
+      el?.addEventListener("change", renderTargetRadius);
+    });
+  </script>
+</body>
+</html>
