@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>商圏市場テスト v2.2.4</title>
+  <title>商圏市場テスト v2.3.1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
@@ -1039,8 +1039,10 @@
           return;
         }
 
-        // --- 媒体ビューのクリック：媒体ごとのセットを編集 ---
+        // --- 媒体ビューのクリック：同じ店cdの町をまとめてON/OFF ---
         if (viewMode === "media" && currentMediaName) {
+          const codeStr = String(code);
+
           // この媒体用のセットを取得（なければ現在ビューから作る）
           let set = mediaViewByName.get(currentMediaName);
           if (!set) {
@@ -1048,21 +1050,71 @@
             mediaViewByName.set(currentMediaName, set);
           }
 
-          if (set.has(code)) {
-            set.delete(code);
-            mediaViewSet.delete(code);
-            map.setFeatureState({ source: "aichi", id: code }, { selected: false });
-          } else {
-            set.add(code);
-            mediaViewSet.add(code);
-            map.setFeatureState({ source: "aichi", id: code }, { selected: true });
+          // この町 × 現在の媒体 で出ている店cdを取得（複数あっても先頭だけ採用）
+          const rowsForTown = mediaIndex?.get(codeStr) || [];
+          const stores = [...new Set(
+            rowsForTown
+              .filter(r => (r["媒体名"] ?? "(名称不明)") === currentMediaName)
+              .map(r => r[STORE_KEY])
+              .filter(v => v != null && v !== "")
+              .map(v => String(v))
+          )];
+
+          const store = stores[0];
+          if (!store) {
+            // 店cd が取れない場合は何もしない
+            updateAggregates();
+            return;
           }
 
-          // ★ 店cdごとの色も更新
+          // この店cdが出ている町リスト（storeToCodes は店cd→町集合）
+          const codesForStore = storeToCodes.get(store) || new Set();
+
+          // 「この媒体」でも同じ店cdが出ている町だけに絞り込む
+          const targetCodes = [];
+          codesForStore.forEach(c => {
+            const cStr = String(c);
+            const rows = mediaIndex.get(cStr);
+            if (!rows) return;
+
+            // 店cd & 媒体名が一致する行があれば対象
+            const hit = rows.some(r =>
+              String(r[STORE_KEY] ?? "") === store &&
+              (r["媒体名"] ?? "(名称不明)") === currentMediaName
+            );
+            if (hit) targetCodes.push(cStr);
+          });
+
+          if (!targetCodes.length) {
+            updateAggregates();
+            return;
+          }
+
+          // クリックした町が選択状態かどうかで、ON/OFF を決める
+          const clickedSelected = set.has(codeStr);
+
+          if (clickedSelected) {
+            // ★ 選択状態 → 同じ店cdの町を全部 OFF
+            for (const c of targetCodes) {
+              set.delete(c);
+              mediaViewSet.delete(c);
+              map.setFeatureState({ source: "aichi", id: c }, { selected: false, storeIdx: 0 });
+            }
+          } else {
+            // ★ 未選択状態 → 同じ店cdの町を全部 ON
+            for (const c of targetCodes) {
+              set.add(c);
+              mediaViewSet.add(c);
+              map.setFeatureState({ source: "aichi", id: c }, { selected: true });
+            }
+          }
+
+          // 店cdごとの色も更新
           updateStoreColorsForCurrentMedia();
 
-          // 媒体ビューでは基準点は動かさない
+          // 基準ビューには触らない
           updateAggregates();
+          return;
         }
       });
 
@@ -1099,11 +1151,17 @@
         }
       };
 
-      map.on("click",(e)=>{ // 背景クリックでも基準更新
-        lastClickLngLat=[e.lngLat.lng,e.lngLat.lat];
+      map.on("click",(e)=>{ // 背景クリックでも基準更新（※媒体ビュー中は動かさない）
+        if (viewMode === "media") {
+          // 媒体ビューのときは基準点・半径円を一切動かさない
+          return;
+        }
+
+        lastClickLngLat = [e.lngLat.lng, e.lngLat.lat];
         chooseBaseByPoint(lastClickLngLat);
         renderTargetRadius();
       });
+
 
       if (geojsonBbox) map.fitBounds(geojsonBbox, { padding: 40, duration: 700 });
       readyGeo = true; tryBuildPrecomputedAsync();
@@ -1311,9 +1369,10 @@
       return null;
     }
 
-    // ★ 業態用：選択中の配布町（selected から基準の町は除外）を対象に、
-    //    業態に紐づく媒体ごとの「視認率」を 1 − Π(1 − coverage_m) で統合して
-    //    推測視認率 / 来店期待値を計算
+    // ★ 業態用：
+    //   「全媒体の選択町（mediaViewByName の union）」のうち、
+    //   「基準の選択町（selected）に含まれる町（※基準の町は除外）」のみを対象に
+    //   推測視認率 / 来店期待値を計算
     function computeGyotaiMetrics(gyotai) {
       if (!mediaIndex || !townIndex || !typeMasterByGyotai) {
         return { viewRate: null, visitRaw: null };
@@ -1324,18 +1383,42 @@
         return { viewRate: null, visitRaw: null };
       }
 
-      // ★ 基準の町は計算から除外
       const baseStr = baseCode ? String(baseCode) : null;
-      const selectedCodes = Array.from(selected).filter(code => {
-        const s = String(code);
-        return !baseStr || s !== baseStr;
-      });
 
-      if (!selectedCodes.length) {
+      // --- ① 全媒体の「選択町」（mediaViewByName の union）を作る ---
+      //     ※ 媒体 ON/OFF（対象/除外中）はここで反映
+      const allMediaSelected = new Set();
+      for (const [mediaName, set] of mediaViewByName.entries()) {
+        if (!isMediaEnabled(mediaName)) continue;  // OFF 媒体は union に含めない
+        for (const c of set) {
+          allMediaSelected.add(String(c));
+        }
+      }
+
+      // --- ② そのうち「基準の選択町」に含まれるコードだけを採用（※基準の町は除外）---
+      let targetCodes = [];
+      if (allMediaSelected.size) {
+        for (const c of allMediaSelected) {
+          const s = String(c);
+          if (baseStr && s === baseStr) continue;   // 基準の町は除外
+          if (!selected.has(s)) continue;           // 基準選択町の範囲外は除外
+          targetCodes.push(s);
+        }
+      }
+
+      // --- ③ 交差が空なら、従来どおり selected（基準選択町のみ）で計算 ---
+      if (!targetCodes.length) {
+        targetCodes = Array.from(selected).filter(code => {
+          const s = String(code);
+          return !baseStr || s !== baseStr;  // 基準の町だけ除外
+        });
+      }
+
+      if (!targetCodes.length) {
         return { viewRate: null, visitRaw: null };
       }
 
-      // この業態に紐づく「媒体」（= media_master.分類 と一致させる前提）
+      // --- この業態に紐づく「媒体カテゴリ」一覧（type_master.媒体） ---
       const categories = new Set(
         rows
           .map(r => String(r["媒体"] ?? "").trim())
@@ -1377,11 +1460,12 @@
         centroidOf(baseCode || "") ||
         getMapCenterLngLat();
 
-      let hhSum   = 0;   // 世帯数の合計（町ごとに一回だけ）
-      let seenSum = 0;   // 見たとみなす世帯数の合計
+      let hhSum   = 0;   // 世帯数の合計
+      let seenSum = 0;   // 見た世帯数の合計
       let visitRaw = 0;  // 来店期待値の元（距離減衰付き指数）
 
-      for (const code of selectedCodes) {
+      // ★ ここが重要：必ず targetCodes を使う（selectedCodes は一切使わない）
+      for (const code of targetCodes) {
         const codeStr = String(code);
         const townRow = townIndex.get(codeStr);
         if (!townRow) continue;
@@ -1392,42 +1476,39 @@
         const mediaRows = mediaIndex.get(codeStr);
         if (!mediaRows) continue;
 
-        // --- この町での「総視認率」: 1 − Π(1 − coverage_m) ---
-        let notSeenProd = 1;  // (1 − coverage_m) を掛けていく
-        let hasAny = false;
+        let notSeenProd = 1;  // 「見ない確率」の積
+        let hasAny = false;   // この町で業態に紐づく有効媒体が1つでもあるか
 
         for (const r of mediaRows) {
           const cat = String(r["分類"] ?? "").trim();
-          if (!categories.has(cat)) continue;
+          if (!categories.has(cat)) continue; // 業態に紐づかない媒体は無視
 
-          // ★ 対象外媒体はここで除外
           const mediaName = r["媒体名"] ?? "(名称不明)";
-          if (!isMediaEnabled(mediaName)) continue;
+          if (!isMediaEnabled(mediaName)) continue;  // 除外中媒体は無視
 
           const copies = toNumber(r["部数"]);
           if (!copies) continue;
 
           const cap = mediaCap.get(cat) ?? 0.6;
-          // 媒体ごとの「生の」カバー率（1世帯1部までを上限）
+          // 1世帯1部までを素視認率1とみなす
           const baseCov = Math.min(1, copies / hh);
-          let cov = baseCov * cap;   // 0〜cap
+          let cov = baseCov * cap;  // 0〜cap
 
           if (cov <= 0) continue;
           if (cov > 1) cov = 1;
 
           hasAny = true;
-          notSeenProd *= (1 - cov);  // 見ない確率を掛け合わせる
+          notSeenProd *= (1 - cov);  // 見ない確率を積算
         }
 
-        // 業態に紐づく媒体がこの町に1つも無い / 全部OFF → この町はスキップ
+        // この町に有効媒体が1つもないなら、そもそも配布対象から外す
         if (!hasAny) continue;
 
-        const coverageTown = 1 - notSeenProd; // 0〜1, 媒体が増えるほど単調増加
+        const coverageTown = 1 - notSeenProd; // 0〜1
 
         hhSum   += hh;
         seenSum += hh * coverageTown;
 
-        // 来店期待値：距離減衰 1/(1 + d[km]) を掛ける
         const p = PRE.get(codeStr);
         const centroid = p?.centroid || centroidOf(codeStr);
         if (centroid && center) {
@@ -1440,27 +1521,45 @@
       const viewRate = hhSum > 0 ? (seenSum / hhSum) : null;
 
       return {
-        viewRate,               // 0〜1
-        visitRaw: visitRaw || null   // 0 なら null 扱い（表示側で "-"）
+        viewRate,
+        visitRaw: visitRaw || null
       };
     }
 
 
-
-    // 業態用：分類ごとの推測視認率＆来店期待値（相対指数の元になる値）を計算
-    //  - category: media_master の「分類」
-    //  - center: [lng, lat] （省略時は lastClickLngLat → baseCode → map center）
     function computeCategoryMetrics(category, center) {
       if (!mediaIndex || !townIndex) return { viewRate: null, visitRaw: null };
 
-      // ★ 基準の町は除外してから計算
       const baseStr = baseCode ? String(baseCode) : null;
-      const selectedCodes = Array.from(selected).filter(code => {
-        const s = String(code);
-        return !baseStr || s !== baseStr;
-      });
 
-      if (!selectedCodes.length) {
+      // --- ① 全媒体の「選択町」を union ---
+      const allMediaSelected = new Set();
+      for (const set of mediaViewByName.values()) {
+        for (const c of set) {
+          allMediaSelected.add(String(c));
+        }
+      }
+
+      // --- ② 基準の選択町との交差（※基準の町は除外）---
+      let targetCodes = [];
+      if (allMediaSelected.size) {
+        for (const c of allMediaSelected) {
+          const s = String(c);
+          if (baseStr && s === baseStr) continue;
+          if (!selected.has(s)) continue;
+          targetCodes.push(s);
+        }
+      }
+
+      // --- ③ 交差が空なら従来どおり selected ベース ---
+      if (!targetCodes.length) {
+        targetCodes = Array.from(selected).filter(code => {
+          const s = String(code);
+          return !baseStr || s !== baseStr;
+        });
+      }
+
+      if (!targetCodes.length) {
         return { viewRate: null, visitRaw: null };
       }
 
@@ -1474,8 +1573,8 @@
       let seenSum = 0;   // 見たとみなす世帯合計
       let visitRaw = 0;  // 距離減衰込みの来店期待値の元
 
-      for (const code of selectedCodes) {
-        const codeStr = String(code);
+    for (const code of targetCodes) {
+      const codeStr = String(code);
         const rowsForTown = mediaIndex.get(codeStr);
         if (!rowsForTown) continue;
 
@@ -2174,6 +2273,10 @@
 
       ensureBaseIfMissing();
       updateBaseFeatureState();
+
+      // ★ 業態指標も常に最新にする
+      renderTypeMetrics();      
+
     }
 
     ["distInput"].forEach(id => {
