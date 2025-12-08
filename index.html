@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>商圏市場テスト v2.3.1</title>
+  <title>商圏市場テスト</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
@@ -33,7 +33,15 @@
     @keyframes pulse { 0%{opacity:.55; transform: scale(.9);} 50%{opacity:1; transform: scale(1);} 100%{opacity:.55; transform: scale(.9);} }
 
     .stack { display:flex; flex-direction:column; gap:8px; margin:8px 0 4px; }
-    .stack input, .stack button, .stack select { width:100%; }
+    .stack input[type="text"],
+    .stack input[type="number"],
+    .stack input[type="search"],
+    .stack input[type="tel"],
+    .stack input[type="email"],
+    .stack button,
+    .stack select {
+      width:100%;
+    }
     .stack input, #budgetInput, #copiesInput, #distInput, #targetAge, #targetAgeMale, #targetAgeFemale, #targetIncome { text-align:right; }
 
     .hit { background:#ecfdf5; border-color:#10b981!important; box-shadow:0 0 0 2px rgba(16,185,129,.15) inset; }
@@ -174,13 +182,105 @@
 
 
     .view-status {
-      margin-top: 2px;
-      margin-bottom: 4px;
-      font-size: 11px;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+
       display: flex;
       align-items: center;
       gap: 6px;
+
+      padding: 4px 10px;
+      border-radius: 999px;
+
+      background: rgba(17,24,39,.94);   /* 半透明のダーク背景 */
+      color: #f9fafb;
+      font-size: 11px;
+
+      border: 1px solid rgba(15,23,42,.7);
+      box-shadow: 0 6px 18px rgba(0,0,0,.25);
     }
+    .view-status-actions {
+      display: flex;
+      gap: 4px;
+      margin-left: 8px;
+    }
+    .view-status button {
+      border-radius: 999px;
+      border: 1px solid rgba(156,163,175,.9);
+      background: rgba(31,41,55,.95);
+      color: #e5e7eb;
+      padding: 2px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .view-status button:hover:not(:disabled) {
+      background: rgba(55,65,81,1);
+    }
+    .view-status button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ★ 1件以上選択されているときの強調色 */
+    .view-status button.is-active {
+      border-color: transparent;
+      background: #2563eb;
+      color: #fff;
+    }
+    .view-status button.is-active:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    .view-status button.is-active {
+      border-color: transparent;
+      background: #2563eb; /* 好きな色に変えてOK（青） */
+      color: #fff;
+    }
+    .view-status button.is-active:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    /* ★ ノブ（白丸）を非表示にする */
+    .click-mode-toggle .toggle-knob {
+      display: none;
+    }
+
+    /* ★ 左側の余白を普通のボタン用に調整 */
+    .click-mode-toggle {
+      padding: 2px 10px;  /* ← もともと 2px 10px 2px 26px だったところ */
+    }
+
+    .click-mode-toggle .toggle-text {
+      font-size: 11px;
+    }
+    .click-mode-toggle.is-select,
+    .click-mode-toggle.is-center {
+      border-color: transparent;
+      color: #fff;
+    }
+
+    /* 町を選択モード（緑） */
+    .click-mode-toggle.is-select {
+      background: #059669;              /* ボタン全体を緑 */
+    }
+    .click-mode-toggle.is-select .toggle-knob {
+      transform: translateX(0);
+      background: #ecfdf5;              /* ノブは薄い緑 */
+    }
+
+    /* 中心点移動モード（青） */
+    .click-mode-toggle.is-center {
+      background: #2563eb;              /* ボタン全体を青 */
+    }
+    .click-mode-toggle.is-center .toggle-knob {
+      transform: translateX(12px);
+      background: #eff6ff;              /* ノブは薄い青 */
+    }
+
     .view-pill {
       display: inline-flex;
       align-items: center;
@@ -207,12 +307,267 @@
       background: #eff6ff;
       color: #1d4ed8;
     }
+    /* === 自動選択ブロック（目標＋ボタン） === */
+    .auto-block {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+    }
+    .auto-block-header {
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .auto-block-header::before {
+      content: "";
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #3b82f6;
+    }
+    .auto-block.has-goal {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 1px rgba(59,130,246,.16);
+      background: #eff6ff;
+    }
+    .auto-targets-main {
+      margin-top: 4px;
+    }
+    .auto-btns {
+      margin-top: 8px;
+    }
+
+    /* 目標入力時に「自動選択」ボタンを強調 */
+    #runAutoBtn.auto-emph {
+      background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+      color: #fff;
+      border-color: #1d4ed8;
+      box-shadow:
+        0 0 0 2px rgba(59,130,246,.15),
+        0 10px 25px rgba(37,99,235,.35);
+      font-weight: 600;
+      transform: translateY(-0.5px);
+    }
+    #runAutoBtn.auto-emph:hover {
+      filter: brightness(1.05);
+      transform: translateY(0);
+    }
+    #runAutoBtn.auto-emph:active {
+      transform: translateY(1px);
+      box-shadow:
+        0 0 0 2px rgba(59,130,246,.18),
+        0 4px 12px rgba(37,99,235,.4);
+    }
+
+    /* 文字を消して区切り線だけ出す */
+    .auto-hint {
+      margin-top: 10px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    /* 提案レポート設定ブロック */
+    .section-block {
+      margin-top: 6px;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      padding: 6px 10px;
+    }
+
+    /* summary 部分の見た目 */
+    .section-block > summary {
+      list-style: none;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* デフォルトの三角マーカーを消す（Chrome系） */
+    .section-block > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    /* 開いているときは少しだけ浮かせる */
+    .section-block[open] {
+      box-shadow: 0 1px 4px rgba(0,0,0,.04);
+    }
+
+    /* summary の下に仕切りラインを入れるための内側ボックス */
+    .section-block-inner {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    /* 提案レポート準備完了時のボタン強調 */
+    #proposalReportBtn.report-ready {
+      background: linear-gradient(180deg, #10b981, #059669);
+      color: #fff;
+      border-color: #047857;
+      box-shadow:
+        0 0 0 2px rgba(16,185,129,.18),
+        0 10px 24px rgba(16,185,129,.35);
+      font-weight: 600;
+      transform: translateY(-0.5px);
+    }
+    #proposalReportBtn.report-ready:hover {
+      filter: brightness(1.05);
+      transform: translateY(0);
+    }
+    #proposalReportBtn.report-ready:active {
+      transform: translateY(1px);
+      box-shadow:
+        0 0 0 2px rgba(16,185,129,.22),
+        0 4px 12px rgba(16,185,129,.4);
+    }
+
+    /* 属性選択：リストボックス風 */
+    .attr-listbox {
+      margin-top: 4px;
+      max-height: 220px;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      padding: 2px 3px;       /* ← 4px 6px から少し狭く */
+      overflow-y: auto;
+    }
+
+    /* 行内のチェックボックスと文字の距離・上下左右の余白を詰める */
+    .attr-row {
+      display: flex;
+      align-items: center;
+      gap: 3px;               /* ← 6px → 3px に */
+      padding: 1px 2px;       /* ← 3px 4px → 1px 2px に */
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .attr-row:hover {
+      background: #eef2ff;
+    }
+    .attr-row-label {
+      font-size: 12px;
+      color: #111827;
+      flex: 1;
+    }
+    
+    .attr-row input {
+      margin: 0;
+      flex-shrink: 0;         /* チェックボックスが縮まないように */
+    }
+
+    .attr-metrics {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #374151;
+    }
+    .attr-metrics-title {
+      font-size: 11px;
+      color: #4b5563;
+      margin: 2px 0 2px;
+    }
+    .attr-metrics-scroll {
+      max-height: 180px;
+      overflow: auto;
+      border-radius: 6px;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      margin-top: 2px;
+    }
+    .attr-metrics table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      min-width: 420px;
+    }
+    .attr-metrics th,
+    .attr-metrics td {
+      border: 1px solid #e5e7eb;
+      padding: 2px 4px;
+      white-space: nowrap;
+    }
+    .attr-metrics th {
+      background: #eef2ff;
+      text-align: left;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .attr-metrics td.num {
+      text-align: right;
+    }
+
+    .attr-metrics-group {
+      margin-top: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+    }
+    .attr-metrics-group-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #111827;
+    }
+
+
+    #attrMetrics table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+    #attrMetrics th,
+    #attrMetrics td {
+      border-bottom: 1px solid #eee;
+      padding: 2px 4px;
+    }
+    #attrMetrics th {
+      background: #f9fafb;
+    }
+    #attrMetrics td.num {
+      text-align: right;
+    }
+    #attrMetrics td.center {
+      text-align: center;
+    }
+    #attrMetrics input[type="checkbox"] {
+      vertical-align: middle;
+    }
+    /* ================================
+       下部の集計系表示を丸ごと非表示にする
+       ・選択
+       ・平均年齢などのサマリ(topStats)
+       ・媒体（媒体名別・選択合計）
+       ・すべての数値列（合計・平均）
+       ・選択中の町丁目（最大50件）
+       ================================ */
+    #summary,
+    #topStats,
+    details:has(#mediaStats),
+    details:has(#allStats),
+    details:has(#picked) {
+      display: none;
+    }
 
 
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <!-- ★ 現在ビュー表示（地図上の別枠） -->
+  <div id="viewStatus" class="view-status"></div>
 
   <div id="overlay" class="overlay">
     <div class="spinner"></div>
@@ -223,9 +578,31 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト v2.2.4</strong></div>
+    <div><strong>商圏市場テスト v2.5.0</strong></div>
+
+    <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
+    <details id="reportHeaderBlock" class="section-block">
+      <summary>提案レポート設定・出力</summary>
+
+      <div class="section-block-inner">
+        <div class="stack" style="margin-top:6px;">
+          <input id="clientNameInput" type="text" placeholder="提案先（クライアント名など）"
+                style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+          <input id="planTitleInput" type="text" placeholder="案件名 / キャンペーン名"
+                style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+          <input id="periodInput" type="text" placeholder="配布期間（例：2026年3月〜4月）"
+                style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+        </div>
+
+        <div class="btns" style="margin-top:6px;">
+          <button id="exportReportBtn">レポート出力（CSV）</button>
+          <button id="proposalReportBtn">提案レポート（印刷 / PDF）</button>
+        </div>
+      </div>
+    </details>
 
     <div class="type-box">
+
       <label for="typeSelect">業態別 SHAP / 貢献度</label>
       <select id="typeSelect">
         <option value="">業態を選択...</option>
@@ -242,49 +619,60 @@
     </div>
 
 
-    <div class="muted">
-      地図を<b>クリックで選択/解除</b>（複数可）。上段は
-      <b>平均年齢</b>・<b>平均年収</b>（中央値推計）、
-      <b>世帯総数 合計</b>、<b>乗用車保有台数 平均</b>（世帯総数で加重平均）を表示。媒体は<b>媒体名別</b>に集計。<br/>
-      <b>基準の町</b>は濃い枠・オレンジ塗り＋中心点で強調。距離目標入力時は基準点中心の<b>半径円</b>を表示。<br/>
-      隣接探索は<b>四隅（bbox）基準</b>で候補を絞り、中心点基準の不利を回避。四隅候補が全て既選択のベースは自動的にスキップします。
-    </div>
 
-    <div class="btns">
-      <button id="clearBtn">全て解除</button>
-      <button id="zoomSelBtn" disabled>選択にズーム</button>
-    </div>
-
-    <div class="stack">
-      <input id="budgetInput" type="text" inputmode="numeric" placeholder="料金目標（万円）"  style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
-      <input id="copiesInput" type="text" inputmode="numeric" placeholder="部数目標（万部）"  style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
-      <input id="distInput"    type="text" inputmode="numeric" placeholder="距離目標（km）※起点はクリック or 自動決定" style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
-    </div>
-
-    <details open>
-      <summary>目標に近づける（年齢・男女年齢・年収） <span class="muted">（未入力なら距離優先で自動選択）</span></summary>
-      <div class="stack">
-        <input id="targetAge"        type="text" inputmode="numeric" placeholder="平均年齢 目標（歳）"        style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
-        <input id="targetAgeMale"    type="text" inputmode="numeric" placeholder="男性平均年齢 目標（歳）"    style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
-        <input id="targetAgeFemale"  type="text" inputmode="numeric" placeholder="女性平均年齢 目標（歳）"    style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
-        <input id="targetIncome"     type="text" inputmode="numeric" placeholder="平均年収 目標（万円）"      style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+    <!-- ★ 目標入力＋自動選択ブロック -->
+    <div id="autoBlock" class="auto-block">
+      <div class="auto-block-header">
+        目標設定 ＆ 自動選択
       </div>
-    </details>
 
-    <div class="btns">
-      <button id="runAutoBtn">自動選択（目標未入力なら距離優先）</button>
-      <button id="stopBtn" class="btn-stop" disabled>
-        <span class="pulse" style="display:none"></span>自動選択を停止
-      </button>
-    </div>
+      <!-- 料金・部数・距離 -->
+      <div class="stack auto-targets-main">
+        <input id="budgetInput" type="text" inputmode="numeric"
+               placeholder="料金目標（万円）"
+               style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+        <input id="copiesInput" type="text" inputmode="numeric"
+               placeholder="部数目標（万部）"
+               style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+        <input id="distInput" type="text" inputmode="numeric"
+               placeholder="距離目標（km）※起点はクリック or 自動決定"
+               style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
+      </div>
 
-    <!-- 基準ビュー & 店cd 拡張ボタン -->
-    <div class="btns">
-      <button id="viewBaseBtn">基準の町だけ表示</button>
-    </div>
+      <!-- 属性選択ブロック：町マスタの「属性」を含む列を自動検出してチェックボックス化 -->
+      <details open style="margin-top:6px;">
+        <summary>重視する属性を選択</summary>
+        <div id="attributeSelectBox" class="stack muted" style="font-size:12px;">
+          町マスタの列名から「属性」を含む列を自動検出して、ここにチェックボックスを表示します。
+        </div>
+      </details>
 
-    <!-- ★ 現在ビュー表示 -->
-    <div id="viewStatus" class="view-status muted"></div>
+      <!-- ★ 属性比較表示エリア（※別グループ） -->
+      <div class="attr-metrics-group">
+        <div class="attr-metrics-group-title">
+          選択した属性の媒体別属性値
+        </div>
+        <div id="attrMetrics" class="attr-metrics muted"></div>
+      </div>
+
+
+
+      <div class="btns auto-btns">
+        <button id="runAutoBtn" type="button" class="auto-emph">
+          自動選択
+        </button>
+        <button id="stopBtn" class="btn-stop" disabled>
+          <span class="pulse" style="display:none"></span>自動選択を停止
+        </button>
+      </div>
+
+
+      <!-- 文言は削除して、区切り線用の空の div にする -->
+      <div class="auto-hint"></div>
+    </div> 
+
+
+
 
     <div id="selectMsg" class="muted"></div>
 
@@ -308,6 +696,9 @@
   </div>
 
   <script>
+    // UI確認用：true なら初期計算あり / false なら初期計算スキップ
+    const ENABLE_PRECOMPUTE = true;   // 普段は true、UIだけ見るときは false に
+
     // ========= 設定 =========
     const GEOJSON_URL = "./aichi_nearpoint50m_withcode.geojson";
     const CSV_TOWN    = "./town_master.csv";
@@ -330,6 +721,10 @@
     let bboxCsvByCode = new Map();
     let featureBboxByCode = new Map();
 
+    // ★ 属性選択用（town_master の列名から「属性」を含む列を自動検出）
+    let attributeColumnKeys = [];
+
+
     // ---- フロンティア抑制 ----
     const SEED_LIMIT   = 200;
     const MAX_SCAN     = 200;
@@ -341,6 +736,16 @@
     let seedLRU = new Map();
     let seedTick = 0;
     function touchSeed(code){ seedLRU.set(String(code), ++seedTick); }
+
+    function escHtml(s) {
+      return String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
 
     function resetFrontierCaches() {
       neighborPtr.clear();
@@ -415,9 +820,50 @@
       el.addEventListener("keydown", (e) => { if (e.key === "Enter") el.blur(); });
     }
 
+    // ★ 目標入力 or 属性選択があれば自動選択ボタンを強調
+    function hasAnyGoalInput() {
+      // 料金・部数・距離のどれかに値が入っていれば true
+      const ids = ["budgetInput", "copiesInput", "distInput"];
+      const hasNumericGoal = ids.some(id => {
+        const el = $(id);
+        if (!el) return false;
+        const v = el.value ?? "";
+        return toNumber(v) > 0;
+      });
+
+      // 属性チェックボックスが1つでも ON なら true
+      const box = $("attributeSelectBox");
+      const hasAttr =
+        box && box.querySelector(".attr-checkbox:checked") ? true : false;
+
+      return hasNumericGoal || hasAttr;
+    }
+
+
+
+    function updateAutoButtonHighlight() {
+      const hasGoal = hasAnyGoalInput();
+      const autoBtn = $("runAutoBtn");
+      const block   = $("autoBlock");
+
+      // ボタンは常に点灯状態
+      if (autoBtn) {
+        autoBtn.classList.add("auto-emph");
+      }
+      // 自動選択ブロックの枠だけは「目標あり」で強調しておく
+      if (block) {
+        block.classList.toggle("has-goal", hasGoal);
+      }
+    }
+
+
     // 停止ボタンと自動実行フラグ
     let STOP = { requested: false };
     let IS_AUTO_RUNNING = false;
+
+    // ★ 提案レポート HTML（1回目クリックで準備 → 2回目で開く）
+    let pendingReportHtml = null;
+
     function setStopEnabled(on){
       const b = $("stopBtn"); if (!b) return;
       b.disabled = !on;
@@ -517,14 +963,118 @@
       return best || 200;
     }
 
+    // ★ town_master から「属性候補の列」を検出
+    function detectAttributeColumnsFromTownMaster() {
+      if (!townIndex || !townIndex.size) return [];
+
+      const sampleRows = Array.from(townIndex.values()).slice(0, 200);
+      if (!sampleRows.length) return [];
+
+      const first = sampleRows[0];
+      const allKeys = Object.keys(first);
+
+      // 明らかに除外したい列
+      const exclude = new Set([
+        CODE_KEY,
+        "市区町村名",
+        "町丁目名",
+        POP_TOTAL_KEY,
+        HH_TOTAL_KEY,
+        CAR_AVG_KEY,
+        BBOX_KEYS.minLon,
+        BBOX_KEYS.minLat,
+        BBOX_KEYS.maxLon,
+        BBOX_KEYS.maxLat
+      ]);
+
+      // 「数値っぽいか？」だけチェックする関数（かなりゆるめ）
+      const isNumericish = (v) => {
+        if (v === null || v === undefined || v === "") return true;
+        if (typeof v === "number") return Number.isFinite(v);
+        const s = String(v).replace(/[^\d.-]/g, "");
+        if (!s) return false;
+        const n = Number(s);
+        return Number.isFinite(n);
+      };
+
+      const cols = allKeys.filter(k => {
+        if (exclude.has(k)) return false;
+
+        // サンプル行の中で「非数値」が混じっていたら外す
+        for (const row of sampleRows) {
+          if (!isNumericish(row[k])) return false;
+        }
+        return true;
+      });
+
+      // 万一なにも取れなかったら、「除外以外全部」を出すセーフティ
+      if (!cols.length) {
+        return allKeys.filter(k => !exclude.has(k));
+      }
+
+      return cols;
+    }
+
+
+
+
     // 地図
-    const style = {"version":8,"sources":{"osm":{"type":"raster","tiles":["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],"tileSize":256,"attribution":"© OpenStreetMap contributors"}},"layers":[{"id":"osm","type":"raster","source":"osm"}]};
-    const map = new maplibregl.Map({ container: "map", style, center: [136.8816, 35.1709], zoom: 12 });
+    const style = {
+      "version": 8,
+      // ★ これを追加
+      "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+
+      "sources": {
+        "osm": {
+          "type": "raster",
+          "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          "tileSize": 256,
+          "attribution": "© OpenStreetMap contributors"
+        }
+      },
+      "layers": [
+        { "id": "osm", "type": "raster", "source": "osm" }
+      ]
+    };
+
+    const map = new maplibregl.Map({
+      container: "map",
+      style,
+      center: [136.8816, 35.1709],
+      zoom: 12,
+      // ★ 地図画像を toDataURL() で抜くために必須
+      preserveDrawingBuffer: true
+    });
+
     map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+    // 地図の再描画完了（idle）を待つヘルパー
+    function waitMapIdle() {
+      return new Promise((resolve) => {
+        if (!map || typeof map.once !== "function") {
+          resolve();
+          return;
+        }
+
+        const onIdle = () => {
+          if (typeof map.off === "function") {
+            map.off("idle", onIdle);
+          }
+          resolve();
+        };
+
+        map.once("idle", onIdle);
+
+        if (typeof map.triggerRepaint === "function") {
+          map.triggerRepaint();
+        }
+      });
+    }
+
 
     // データ
     let townIndex = null;
-    let mediaIndex = null;
+    let mediaIndex = null;  
     let storeToCodes = null;
     let numericKeys = [];
     let incomeWidthFallback = 200;
@@ -594,6 +1144,9 @@
     // 表示モード: 'base' = 基準の町, 'media' = 媒体の町
     let viewMode = "base";
 
+    // クリック動作: 'select' = 町を選択, 'center' = 中心点を移動
+    let clickMode = "center";
+
     let geojsonBbox = null;
 
     // 媒体ビュー用：店cd → 色インデックス（1,2,3...）
@@ -661,6 +1214,25 @@
       if (selected.size){ baseCode = String(Array.from(selected)[0]); updateBaseFeatureState(); return; }
       if (allFeatures.length){ chooseBaseByPoint(getMapCenterLngLat()); }
     }
+
+    // ★ 自動選択開始時：何も選択されていなければ「中心点の町」を1件だけ選ぶ
+    function ensureBaseTownSelectedForAuto(targetDistMeters = 0) {
+      if (selected.size > 0) return; // 既に何か選んでいれば何もしない
+
+      // 基準町（中心点になる町）を決める
+      ensureBaseIfMissing();
+      const baseStr = baseCode ? String(baseCode) : null;
+      if (!baseStr) return;
+
+      // 距離目標があっても、中心点の町は必ず 0m なのでここでは特に判定不要
+      selected.add(baseStr);
+      map.setFeatureState({ source: "aichi", id: baseStr }, { selected: true });
+
+      // 基準町を起点に媒体セットも広げる
+      autoExpandMediaFromBaseTown(baseStr);
+    }
+
+
     function updateBaseFeatureState(){
       try{
         if (!map.getSource("aichi")) return;
@@ -680,12 +1252,32 @@
         prevBaseCode = baseCode;
 
         const pt = centroidOf(baseCode || "");
-        map.getSource("base-point")?.setData(
-          pt
-            ? { type:"FeatureCollection",
-                features:[{type:"Feature", geometry:{type:"Point", coordinates: pt}}] }
-            : { type:"FeatureCollection", features:[] }
-        );
+
+        // 基準点（中心点）のラベル用名前を作る
+        let labelName = "";
+        const baseCodeStr = baseCode && String(baseCode);
+        if (baseCodeStr && townIndex?.has(baseCodeStr)) {
+          const row = townIndex.get(baseCodeStr);
+          labelName =
+            `${row["市区町村名"] ?? ""} ${row["町丁目名"] ?? ""}`.trim() || baseCodeStr;
+        }
+
+        // GeoJSON をセット（name プロパティ付き）
+        const baseFeatures = pt
+          ? [{
+              type: "Feature",
+              geometry: { type: "Point", coordinates: pt },
+              properties: { name: labelName }
+            }]
+          : [];
+
+        map.getSource("base-point")?.setData({
+          type: "FeatureCollection",
+          features: baseFeatures
+        });
+
+        // ★ 基準の町が変わったら属性比較も更新
+        updateAttrMetrics();
       }catch(e){ console.warn("updateBaseFeatureState skipped:", e); }
     }
 
@@ -737,33 +1329,53 @@
     }
 
 
-    // ★ 現在ビュー表示の更新
     function updateViewStatus() {
       const el = $("viewStatus");
       if (!el) return;
 
-      const baseBtn   = $("viewBaseBtn");
-      const expandBtn = $("expandFromBaseBtn");
+      // ★ 選択されている町が1件以上あるか
+      const hasSel = getActiveSet().size > 0;
 
-      // ボタン強調リセット
-      baseBtn?.classList.remove("view-toggle-active");
-      expandBtn?.classList.remove("view-toggle-active");
+      // ★ 選択があるときだけ付けるクラス
+      const activeCls = hasSel ? ' class="is-active"' : '';
+
+      // トグルボタン共通HTML
+      const toggleHtml = `
+        <button id="clickModeToggleBtn" type="button"
+          class="click-mode-toggle ${clickMode === "select" ? "is-select" : "is-center"}">
+          <span class="toggle-knob"></span>
+          <span class="toggle-text">
+            ${clickMode === "select" ? "クリックで町を選択" : "クリックで中心点を移動"}
+          </span>
+        </button>
+      `;
 
       if (viewMode === "base") {
         el.innerHTML = `
           <span class="view-pill view-pill-base">基準ビュー</span>
           <span>青＝基準の町セット（自動選択対象）</span>
+          <div class="view-status-actions">
+            <button id="clearBtn" type="button"${activeCls}>全て解除</button>
+            <button id="zoomSelBtn" type="button" class="is-active">選択にズーム</button>
+            ${toggleHtml}
+          </div>
         `;
-        baseBtn?.classList.add("view-toggle-active");
       } else {
         const nameText = currentMediaName || "（媒体未選択）";
         el.innerHTML = `
           <span class="view-pill view-pill-media">媒体ビュー</span>
-          <span>対象媒体：<span class="view-status-name">${nameText}</span></span>
+          <span>対象媒体：<span class="view-status-name">${escHtml(nameText)}</span></span>
+          <div class="view-status-actions">
+            <button id="clearBtn" type="button"${activeCls}>全て解除</button>
+            <button id="zoomSelBtn" type="button" class="is-active">選択にズーム</button>
+            ${toggleHtml}
+          </div>
         `;
-        expandBtn?.classList.add("view-toggle-active");
       }
     }
+
+
+
 
     function isMediaEnabled(name) {
       if (!name) return true;
@@ -771,27 +1383,89 @@
     }
 
 
-    function renderTargetRadius(){
+    function renderTargetRadius() {
       const km = toNumber($("distInput").value);
-      const r = Math.round(km * 1000);
+      const r  = Math.round(km * 1000);
       const center =
-        (lastClickLngLat ? lastClickLngLat : centroidOf(baseCode||"")) || getMapCenterLngLat();
+        (lastClickLngLat ? lastClickLngLat : centroidOf(baseCode || "")) ||
+        getMapCenterLngLat();
 
-      const fc = { type:"FeatureCollection", features:[] };
-      if (center && r > 0){
-        const feat = circlePolygon(center, r, 256);
-        feat.properties = { label: `半径 ${km.toLocaleString()} km` };
-        fc.features = [ feat ];
+      const fc = { type: "FeatureCollection", features: [] };
+
+      if (center && r > 0) {
+        // 円ポリゴン（線・塗り用）
+        const circle = circlePolygon(center, r, 256);
+        circle.properties = { kind: "area" };   // ★ ポリゴン側
+
+        // 円周上（いちばん上）の座標をラベル位置にする
+        const coords = circle.geometry.coordinates[0] || [];
+        let labelCoord = center;
+        if (coords.length) {
+          labelCoord = coords.reduce(
+            (best, cur) => (cur[1] > best[1] ? cur : best),
+            coords[0]
+          );
+        }
+
+        // ラベル用ポイント 1個だけ
+        const labelFeature = {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: labelCoord },
+          properties: {
+            kind: "label",                             // ★ ラベル用
+            label: `半径 ${km.toLocaleString()} km`
+          }
+        };
+
+        fc.features = [circle, labelFeature];
       }
+
       map.getSource("target-radius")?.setData(fc);
     }
+
+    function setMediaEnabled(name, enabled) {
+      name = String(name);
+      mediaEnabledByName.set(name, !!enabled);
+
+      // --- mediaStats テーブル側を更新 ---
+      document.querySelectorAll("#mediaStats tr[data-media-name]").forEach(tr => {
+        if (tr.getAttribute("data-media-name") !== name) return;
+
+        tr.classList.toggle("media-row-disabled", !enabled);
+        const btn = tr.querySelector(".media-toggle");
+        if (btn) {
+          btn.classList.toggle("off", !enabled);
+          btn.textContent = enabled ? "対象" : "除外中";
+        }
+      });
+
+      // --- 属性サマリ側のチェックも同期 ---
+      document.querySelectorAll("#attrMetrics .attr-target-check").forEach(cb => {
+        if (cb.dataset.mediaName === name) {
+          cb.checked = enabled;
+        }
+      });
+
+      // 再集計・業態指標も更新
+      updateAggregates();
+      renderTypeMetrics();
+
+      // ★ 属性比較テーブルも更新（基準の町の部数などを再計算）
+      updateAttrMetrics();
+    }
+
 
     // ローディングUI
     const overlay = $("overlay"), overlayTitle = $("overlayTitle"), overlayMsg = $("overlayMsg"), overlayBar = $("overlayBar"), overlaySub = $("overlaySub");
     function showOverlay(title, msg){ overlay.style.display="flex"; overlayTitle.textContent = title||""; overlayMsg.textContent = msg||""; }
     function hideOverlay(){ overlay.style.display="none"; }
     function setProgress(p, sub=""){ overlayBar.style.width = `${Math.max(0, Math.min(100, p))}%`; overlaySub.textContent = sub; }
-    showOverlay("初期計算を準備中…", "CSVと地図の読み込みを待機中");
+    if (ENABLE_PRECOMPUTE) {
+      showOverlay("初期計算を準備中…", "CSVと地図の読み込みを待機中");
+    } else {
+      hideOverlay();   // UIデバッグ時はすぐ閉じる
+    }
+
 
     Papa.parse(CSV_TOWN, {
       header: true, download: true, dynamicTyping: true, encoding: "utf-8",
@@ -815,9 +1489,55 @@
 
         $("summary").innerHTML = `<span>CSV(町)</span><span>読込完了（${rows.length} 件 / bbox ${bboxCsvByCode.size} 件）</span>`;
         readyTown = true; tryBuildPrecomputedAsync();
+        setupAttributeSelector();
       },
       error: (err) => { $("summary").innerHTML = `<span>CSV(町)エラー</span><span>${err}</span>`; console.error(err); }
     });
+
+    function setupAttributeSelector() {
+      const box = $("attributeSelectBox");
+      if (!box) return;
+
+      const cols = detectAttributeColumnsFromTownMaster();
+      if (!cols.length) {
+        box.textContent = "町マスタの数値項目が検出できませんでした。必要に応じて detectAttributeColumnsFromTownMaster() を調整してください。";
+        return;
+      }
+
+      attributeColumnKeys = cols;
+
+      box.innerHTML = `
+        <div>
+          重視したい数値項目にチェックを入れてください（複数選択可）。<br>
+          例：年齢別人口、年収階級別世帯数など、town_master にある数値列はすべて候補になります。
+        </div>
+        <div class="attr-listbox">
+          ${cols.map(k => `
+            <label class="attr-row">
+              <input type="checkbox"
+                     class="attr-checkbox"
+                     data-attr-key="${escHtml(k)}">
+              <span class="attr-row-label">${escHtml(k)}</span>
+            </label>
+          `).join("")}
+        </div>
+      `;
+
+      // チェック状態が変わったらボタン強調 & 比較表を更新
+      box.querySelectorAll(".attr-checkbox").forEach(chk => {
+        chk.addEventListener("change", () => {
+          updateAutoButtonHighlight();
+          updateAttrMetrics();
+          updateAttrSummaryLabel();
+        });
+      });
+
+      // 初期描画
+      updateAttrMetrics();
+      updateAttrSummaryLabel();
+    }
+
+
 
     Papa.parse(CSV_MEDIA, {
       header: true, download: true, dynamicTyping: true, encoding: "utf-8",
@@ -940,14 +1660,45 @@
         paint:{ "line-color":"#dc2626", "line-width":3.5, "line-dasharray":[2,2], "line-opacity":0.95 }});
       map.addLayer({ id:"target-radius-fill", type:"fill", source:"target-radius",
         paint:{ "fill-color":"#fecaca", "fill-opacity":0.28 }});
-      map.addLayer({ id:"target-radius-label", type:"symbol", source:"target-radius",
-        layout:{ "text-field":["get","label"], "text-size":14, "text-allow-overlap": true, "text-anchor":"center" },
-        paint:{ "text-color":"#991b1b", "text-halo-color":"#ffffff", "text-halo-width":2 }});
+      map.addLayer({
+        id: "target-radius-label",
+        type: "symbol",
+        source: "target-radius",
+        filter: ["==", ["get", "kind"], "label"],   // ★ ラベル用ポイントだけ
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": 14,
+          "text-anchor": "center",
+          "text-allow-overlap": false
+        },
+        paint: {
+          "text-color": "#991b1b",
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 2
+        }
+      });
 
       // 基準点
       map.addSource("base-point", { type:"geojson", data:{ type:"FeatureCollection", features:[] } });
       map.addLayer({ id:"base-point-circle", type:"circle", source:"base-point",
         paint:{ "circle-radius":6, "circle-color":"#ea580c", "circle-stroke-color":"#fff", "circle-stroke-width":2 }});
+
+      map.addLayer({
+        id: "base-point-label",
+        type: "symbol",
+        source: "base-point",
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 14,
+          "text-anchor": "top",
+          "text-offset": [0, 1.2]   // 点の少し上に表示
+        },
+        paint: {
+          "text-color": "#111827",
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 2
+        }
+      });
 
       // 町ポリゴン      
       map.addLayer({ id:"aichi-fill", type:"fill", source:"aichi",
@@ -1001,6 +1752,21 @@
                   ["boolean",["feature-state","base"],false], 2.6,
                   ["boolean",["feature-state","selected"],false], 1.8,
                   0.6 ] }});
+      
+            // ★ 中心点と距離圏の円を最前面に出す
+            [
+              "target-radius-fill",
+              "target-radius-halo",
+              "target-radius-line",
+              "base-point-circle",
+              "base-point-label",
+              "target-radius-label"
+            ].forEach(id => {
+              if (map.getLayer(id)) {
+                map.moveLayer(id);
+              }
+            });
+
 
       let hovered=null;
       map.on("mousemove","aichi-fill",(e)=>{ const f=e.features?.[0]; if(!f) return;
@@ -1017,26 +1783,40 @@
         const code = String(f.properties?.[CODE_KEY] ?? "");
         if (!code) return;
 
-        // --- 基準ビューのクリック（今まで通り ＋ 媒体側も自動展開） ---
+        // --- 基準ビューのクリック ---
         if (viewMode === "base") {
-          if (selected.has(code)) {
-            // 解除時はとりあえず何もしない（媒体側は自動では消さない）
-            selected.delete(code);
-            map.setFeatureState({ source: "aichi", id: code }, { selected: false });
-          } else {
-            // ★ 新たに基準町を追加
-            selected.add(code);
-            map.setFeatureState({ source: "aichi", id: code }, { selected: true });
 
-            // ★ 追加された町を起点に、媒体ごとの「店cd展開セット」を更新
-            autoExpandMediaFromBaseTown(code);
+          // クリックで「町を選択」モード
+          if (clickMode === "select") {
+            if (selected.has(code)) {
+              // 解除時はとりあえず何もしない（媒体側は自動では消さない）
+              selected.delete(code);
+              map.setFeatureState({ source: "aichi", id: code }, { selected: false });
+            } else {
+              // ★ 新たに基準町を追加
+              selected.add(code);
+              map.setFeatureState({ source: "aichi", id: code }, { selected: true });
+
+              // ★ 追加された町を起点に、媒体ごとの「店cd展開セット」を更新
+              autoExpandMediaFromBaseTown(code);
+            }
+
+            // 基準点は動かさない
+            updateAggregates();
+            updateViewStatus();
+            updateAttrMetrics();
+            return;
           }
 
-          lastClickLngLat = [e.lngLat.lng, e.lngLat.lat];
-          chooseBaseByPoint(lastClickLngLat);
-          renderTargetRadius();
-          updateAggregates();
-          return;
+          // クリックで「中心点を移動」モード
+          if (clickMode === "center") {
+            lastClickLngLat = [e.lngLat.lng, e.lngLat.lat];
+            baseCode = code;
+            resetFrontierCaches();
+            updateBaseFeatureState();
+            renderTargetRadius();
+            return;
+          }
         }
 
         // --- 媒体ビューのクリック：同じ店cdの町をまとめてON/OFF ---
@@ -1114,46 +1894,17 @@
 
           // 基準ビューには触らない
           updateAggregates();
+          updateViewStatus(); 
+          updateAttrMetrics();
           return;
         }
       });
 
 
-      $("clearBtn").onclick = () => {
-        const allCodes = new Set([...selected, ...mediaViewSet]);
-        for (const code of allCodes){
-          map.setFeatureState({source:"aichi", id: code}, {selected:false});
-        }
-        selected.clear();
-        mediaViewSet.clear();
-        mediaViewByName.clear();   // ★ これを追加
-        viewMode = "base";
-        currentMediaName = null;
-        resetFrontierCaches();
-        updateAggregates();
-        updateViewStatus();
-        if (IS_AUTO_RUNNING) setStopEnabled(true); else resetStop();
-      };
 
-
-      $("zoomSelBtn").onclick = () => {
-        const currentSet = getActiveSet();
-        if (!currentSet.size) return;
-        let minx= 1e9, miny= 1e9, maxx=-1e9, maxy=-1e9;
-        for (const c of currentSet){
-          const b = bboxOf(c);
-          if (!b) continue;
-          const [[x1,y1],[x2,y2]] = b;
-          if (x1<minx) minx=x1; if (y1<miny) miny=y1; if (x2>maxx) maxx=x2; if (y2>maxy) maxy=y2;
-        }
-        if (minx<maxx && miny<maxy){
-          map.fitBounds([[minx,miny],[maxx,maxy]], { padding: 40, duration: 500 });
-        }
-      };
-
-      map.on("click",(e)=>{ // 背景クリックでも基準更新（※媒体ビュー中は動かさない）
-        if (viewMode === "media") {
-          // 媒体ビューのときは基準点・半径円を一切動かさない
+      map.on("click",(e)=>{ // 背景クリックでも基準更新（※媒体ビュー中 or 選択モード中は動かさない）
+        if (viewMode === "media" || clickMode === "select") {
+          // 媒体ビュー中 or 「町を選択」モード中は中心点を動かさない
           return;
         }
 
@@ -1161,6 +1912,80 @@
         chooseBaseByPoint(lastClickLngLat);
         renderTargetRadius();
       });
+
+      // 「全て解除」「選択にズーム」などは viewStatus 内に動的に描画するので
+      // ドキュメント全体に対してイベント委譲で処理する
+      document.addEventListener("click", (ev) => {
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+
+        if (t.id === "clearBtn") {
+          ev.preventDefault();
+
+          const allCodes = new Set([...selected, ...mediaViewSet]);
+          for (const code of allCodes) {
+            map.setFeatureState({ source: "aichi", id: code }, { selected: false });
+          }
+          selected.clear();
+          mediaViewSet.clear();
+          mediaViewByName.clear();
+          viewMode = "base";
+          currentMediaName = null;
+          resetFrontierCaches();
+          updateAggregates();
+          updateViewStatus();
+          if (IS_AUTO_RUNNING) setStopEnabled(true); else resetStop();
+
+          // 目標入力強調もリセット
+          updateAutoButtonHighlight();
+
+        } else if (t.id === "zoomSelBtn") {
+          ev.preventDefault();
+
+          const currentSet = getActiveSet();
+
+          // ★ 町が未選択のときは「中心点（基準の町）」にズーム
+          if (!currentSet.size) {
+            // 中心点の取り方は、ターゲット円と同じロジックを流用
+            const center =
+              (lastClickLngLat ? lastClickLngLat : centroidOf(baseCode || "")) || getMapCenterLngLat();
+
+            if (center) {
+              map.flyTo({
+                center,
+                zoom: 14,      // 好きなズームレベルに調整してOK
+                duration: 500,
+              });
+            }
+            return;
+          }
+
+          // ★ 1件以上選択されているときは、今まで通り「選択範囲」にズーム
+          let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
+          for (const c of currentSet) {
+            const b = bboxOf(c);
+            if (!b) continue;
+            const [[x1, y1], [x2, y2]] = b;
+            if (x1 < minx) minx = x1;
+            if (y1 < miny) miny = y1;
+            if (x2 > maxx) maxx = x2;
+            if (y2 > maxy) maxy = y2;
+          }
+          if (minx < maxx && miny < maxy) {
+            map.fitBounds([[minx, miny], [maxx, maxy]], { padding: 40, duration: 500 });
+          }
+
+
+        // ▼ ここを追加 ▼
+        } else if (t.id === "clickModeToggleBtn" || t.closest?.("#clickModeToggleBtn")) {
+          ev.preventDefault();
+          // モードをトグル
+          clickMode = (clickMode === "select") ? "center" : "select";
+          // ボタンの表示を更新
+          updateViewStatus();
+        }
+      });
+
 
 
       if (geojsonBbox) map.fitBounds(geojsonBbox, { padding: 40, duration: 700 });
@@ -1176,10 +2001,90 @@
     setupSmartFormatter("targetAgeFemale",  "歳");
     setupSmartFormatter("targetIncome",     "万円");
 
+    // ★ 目標入力欄の変化で自動選択ボタンの強調を更新
+    ["budgetInput","copiesInput","distInput",
+     "targetAge","targetAgeMale","targetAgeFemale","targetIncome"
+    ].forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      ["input","change","blur"].forEach(ev =>
+        el.addEventListener(ev, updateAutoButtonHighlight)
+      );
+    });
+
+    // 初期状態
+    updateAutoButtonHighlight();
+
+
     // 事前計算
     let PRE = new Map();
     let neighborCache = new Map();
     let neighborPtr   = new Map();
+
+    // 対象ONの媒体だけの料金・部数を合計（1町分）
+    function getEnabledMediaTotalsForTown(code) {
+      const key = String(code);
+      if (!mediaIndex) return { yen: 0, cps: 0 };
+
+      const rowsForTown = mediaIndex.get(key);
+      if (!rowsForTown) return { yen: 0, cps: 0 };
+
+      let yen = 0;
+      let cps = 0;
+      for (const r of rowsForTown) {
+        const mName = r["媒体名"] ?? "(名称不明)";
+        if (!isMediaEnabled(mName)) continue;  // 対象ONのみ
+        yen += toNumber(r["料金"]);
+        cps += toNumber(r["部数"]);
+      }
+      return { yen, cps };
+    }
+
+    // ★ 現在の「全媒体対象（対象ONのみ）」の料金・部数合計
+    function getCurrentAllMediaTotals() {
+      if (!mediaIndex || !mediaCodesAllByName) return { yen: 0, cps: 0 };
+
+      let yen = 0;
+      let cps = 0;
+
+      // 媒体ごとに、「この媒体で配布している町の集合」を決めて集計
+      for (const [name, allCodesForMedia] of mediaCodesAllByName.entries()) {
+        // OFF の媒体は完全に無視
+        if (!isMediaEnabled(name)) continue;
+
+        const explicitSet = mediaViewByName.get(name);
+        let codesForSum;
+
+        if (explicitSet && explicitSet.size > 0) {
+          // 媒体ビューで明示的に選択されている町
+          codesForSum = explicitSet;
+        } else {
+          // まだ媒体ビューで選択が無い → 基準ビューで選択されている町だけ
+          codesForSum = new Set();
+          for (const code of selected) {
+            if (allCodesForMedia.has(String(code))) {
+              codesForSum.add(String(code));
+            }
+          }
+        }
+
+        if (!codesForSum.size) continue;
+
+        for (const code of codesForSum) {
+          const rowsForTown = mediaIndex.get(String(code));
+          if (!rowsForTown) continue;
+          for (const r of rowsForTown) {
+            const mName = r["媒体名"] ?? "(名称不明)";
+            if (mName !== name) continue;   // この媒体の行だけ集計
+            yen += toNumber(r["料金"]);
+            cps += toNumber(r["部数"]);
+          }
+        }
+      }
+
+      return { yen, cps };
+    }
+
 
     async function buildPrecomputedAsync(){
       showOverlay("初期計算中…", "人口・年齢・年収と媒体の合計を準備しています");
@@ -1248,6 +2153,10 @@
     }
 
     function tryBuildPrecomputedAsync(){
+      if (!ENABLE_PRECOMPUTE) {
+        // 初期計算オフモード：何もしない
+        return;
+      }
       if (readyTown && readyMedia && readyGeo){
         buildPrecomputedAsync().catch(e=>{
           console.error(e);
@@ -1255,6 +2164,7 @@
         });
       }
     }
+
 
     // ---- 四隅隣接ユーティリティ ----
     function pointInBbox(pt, bbox) {
@@ -1294,12 +2204,21 @@
     function isCornerExhausted(code){
       if (!USE_CORNER_ADJACENCY) return false;
       const k = String(code);
+
+      // すでに判定済みならそのまま返す
       if (exhaustedCornerBase.get(k)) return true;
+
       const cand = getCornerAdjacentList(k);
+
+      // ★ここがポイント★
+      // 角隣接の候補が 0 件の場合は「枯渇」扱いにしないで false を返す。
+      // → この町は「四隅ベースの隣接がないだけ」で、
+      //    全町からの距離ソートにフォールバックさせる。
       if (cand.length === 0){
-        exhaustedCornerBase.set(k, true);
-        return true;
+        return false;
       }
+
+      // 候補が全部 selected に含まれているときだけ枯渇扱い
       for (const c of cand){
         if (!selected.has(String(c))){
           return false;
@@ -1309,11 +2228,17 @@
       return true;
     }
 
+
     // 距離キャッシュ
     function getDistanceSortedList(origin){
       const arr = allFeatures.map(f => {
-        const p = PRE.get(String(f.code));
-        return { code: f.code, d: distMeters(origin, f.centroid), cost: p ? p.yen : 0, cps: p ? p.cps : 0 };
+        const t = getEnabledMediaTotalsForTown(f.code);
+        return {
+          code: f.code,
+          d: distMeters(origin, f.centroid),
+          cost: t.yen,
+          cps: t.cps
+        };
       });
       arr.sort((a,b)=>a.d-b.d);
       return arr;
@@ -1321,6 +2246,7 @@
 
     function getNeighborList(code){
       if (isCornerExhausted(code)) {
+        // 本当に「四隅候補は存在していて、それが全部選ばれている」場合だけここに来る
         neighborCache.set(code, []);
         neighborPtr.set(code, 0);
         return [];
@@ -1329,17 +2255,24 @@
       let candidates = null;
       if (USE_CORNER_ADJACENCY) {
         const arr = getCornerAdjacentList(code);
-        if (arr.length === 0) {
-          neighborCache.set(code, []); neighborPtr.set(code, 0);
-          return [];
+
+        // ★候補が 1 件以上あるときだけ「四隅候補」モードを使う
+        // 0 件のときは candidates=null のまま → 全町からフォールバック
+        if (arr.length > 0) {
+          candidates = new Set(arr);
         }
-        candidates = new Set(arr);
       }
 
       if (neighborCache.has(code)) return neighborCache.get(code);
-      const c0 = centroidOf(code); if (!c0) return [];
+
+      const c0 = centroidOf(code);
+      if (!c0) return [];
+
       const arr = [];
-      const pool = candidates ? [...candidates] : allFeatures.map(f => String(f.code));
+      const pool = candidates
+        ? [...candidates]                      // 四隅候補がある場合 → それだけを対象
+        : allFeatures.map(f => String(f.code)); // 四隅候補が無い場合 → 全町から距離ソート
+
       for (const c of pool){
         if (String(c) === String(code)) continue;
         const p = PRE.get(String(c));
@@ -1351,6 +2284,7 @@
       neighborPtr.set(code, 0);
       return arr;
     }
+
     function nearestUnpickedFast(fromCode, excludeSet){
       if (isCornerExhausted(fromCode)) return null;
 
@@ -1649,8 +2583,13 @@
       const targetDist   = Math.round(toNumber($("distInput").value)   * 1000);
 
       const $out = $("selectMsg");
-      if (!(PRE.size)) { $out.textContent = "初期計算の完了を待っています。"; return; }
-      if (!(targetYen > 0 || targetCopies > 0 || targetDist > 0)) { $out.textContent = "少なくとも1つの目標（料金・部数・距離）を入力してください。"; return; }
+      if (!PRE.size) {
+        $out.textContent = "初期計算の完了を待っています。";
+        return;
+      }
+
+      // ★ 目標が未入力（全部 0）の場合も、そのまま距離優先で実行する
+      //    targetYen / targetCopies / targetDist が 0 のままでも OK
 
       // 常に基準モードで実行
       viewMode = "base";
@@ -1660,16 +2599,23 @@
       updateBaseFeatureState();
       renderTargetRadius();
 
+      // ★ ここで「中心点の町」を1件だけ先に選択しておく
+      ensureBaseTownSelectedForAuto(targetDist);
+      updateAggregates();
+      updateAttrMetrics();
+
       beginAuto();
       try {
-        let totalYen = 0, totalCps = 0;
-        for (const c of selected){
-          const p = PRE.get(String(c));
-          if (p){ totalYen += p.yen; totalCps += p.cps; }
-        }
-        let picked = selected.size;
+        // ★ 料金・部数の目標判定は「全媒体対象（対象ONのみ）」を使う
+        let { yen: totalYen, cps: totalCps } = getCurrentAllMediaTotals();
 
-        const origin = lastClickLngLat ?? centroidOf(baseCode||"") ?? getMapCenterLngLat();
+
+
+        // 距離の中心は「基準の町」を最優先
+        const origin =
+          centroidOf(baseCode||"") ??
+          lastClickLngLat ??
+          getMapCenterLngLat();
         const rankedAll = getDistanceSortedList(origin);
         let ranked = rankedAll.filter(r => !selected.has(String(r.code)));
         let hadDistFilter = false, hasOutside = false;
@@ -1681,30 +2627,43 @@
         }
 
         let stoppedBy = null;
-        if (targetYen>0 && totalYen >= targetYen) stoppedBy = 'yen';
-        if (!stoppedBy && targetCopies>0 && totalCps >= targetCopies) stoppedBy = 'copies';
+        let step = 0;
 
-        let step=0;
         for (const r of ranked) {
-          if (stoppedBy) break;
-          if (STOP.requested) { stoppedBy = 'stop'; break; }
-          const p = PRE.get(String(r.code));
-          const nextYen = totalYen + (p?.yen||0), nextCps = totalCps + (p?.cps||0);
-          if (targetYen > 0 && nextYen > targetYen) { stoppedBy = 'yen'; break; }
-          if (targetCopies > 0 && nextCps > targetCopies) { stoppedBy = 'copies'; break; }
+          if (STOP.requested) { 
+            stoppedBy = 'stop';
+            break;
+          }
 
-          selected.add(String(r.code));
-          map.setFeatureState({source:"aichi", id: String(r.code)}, {selected:true});
+          // まず選択に追加する
+          const codeStr = String(r.code);
+          selected.add(codeStr);
+          map.setFeatureState({ source: "aichi", id: codeStr }, { selected: true });
+          autoExpandMediaFromBaseTown(codeStr);
 
-          // ★ 自動で選ばれた町も、媒体セットに反映する
-          autoExpandMediaFromBaseTown(String(r.code));
+          // ★ 追加後の「全媒体対象（対象ONのみ）」を再計算
+          ({ yen: totalYen, cps: totalCps } = getCurrentAllMediaTotals());
+          picked++;
 
-          totalYen = nextYen; totalCps = nextCps; picked++;
+          // ★追加したあとで、目標到達（超過含む）をチェックして止める
+          if (targetYen > 0 && totalYen >= targetYen) {
+            stoppedBy = 'yen';
+            break;
+          }
+          if (targetCopies > 0 && totalCps >= targetCopies) {
+            stoppedBy = 'copies';
+            break;
+          }
 
-          if ((++step % 20) === 0) { updateAggregates(); await sleep(0); }
+          if ((++step % 20) === 0) {
+            updateAggregates();
+            await sleep(0);
+          }
         }
+
         if (!stoppedBy && hadDistFilter && ranked.length===0 && hasOutside) stoppedBy='dist';
         updateAggregates();
+        updateAttrMetrics();
 
         const totalYen10k    = Math.round(totalYen / 10000);
         const totalCopies10k = Math.round(totalCps / 10000);
@@ -1766,8 +2725,13 @@
       updateBaseFeatureState();
       renderTargetRadius();
 
+      // ★ 基準町＝中心点の町を最初に1件選ぶ
+      ensureBaseTownSelectedForAuto(targetDist);
+      updateAggregates();
+
       beginAuto();
       try {
+
         $("budgetInput")?.classList.remove("hit"); $("copiesInput")?.classList.remove("hit"); $("distInput")?.classList.remove("hit");
 
         let agg = { ageW:0, ageN:0, maleW:0, maleN:0, femaleW:0, femaleN:0, incW:0, incN:0 };
@@ -1778,10 +2742,17 @@
           agg.maleW += p.maleW; agg.maleN += p.maleN;
           agg.femaleW += p.femaleW; agg.femaleN += p.femaleN;
           agg.incW += p.incW; agg.incN += p.incN;
-          totalYen += p.yen; totalCps += p.cps;
+
+          const t = getEnabledMediaTotalsForTown(c); // ★ ここでON媒体だけ
+          totalYen += t.yen;
+          totalCps += t.cps;
         }
 
-        const centerForRadius = lastClickLngLat ?? centroidOf(baseCode||"") ?? getMapCenterLngLat();
+
+        const centerForRadius =
+          centroidOf(baseCode || "") ??
+          lastClickLngLat ??
+          getMapCenterLngLat();
         let allowedInRadius = null;
         if (targetDist > 0 && centerForRadius){
           allowedInRadius = new Set();
@@ -1847,7 +2818,11 @@
             femaleW: agg.femaleW + p0.femaleW, femaleN: agg.femaleN + p0.femaleN,
             incW: agg.incW + p0.incW, incN: agg.incN + p0.incN
           };
-          totalYen += p0.yen; totalCps += p0.cps;
+
+          // ★ 料金・部数は「対象ONの媒体だけ」にする
+          const t0 = getEnabledMediaTotalsForTown(firstCode);
+          totalYen += t0.yen;
+          totalCps += t0.cps;
           map.setFeatureState({source:"aichi", id:firstCode}, {selected:true});
           if (!seedLRU.has(firstCode)) seedLRU.set(firstCode, -1);
 
@@ -1856,7 +2831,8 @@
 
           if (!baseStr) { baseCode = String(firstCode); updateBaseFeatureState(); renderTargetRadius(); }
 
-          updateAggregates(); await sleep(0);
+          updateAggregates(); 
+          await sleep(0);
         }
 
         let order = getInitialSeeds(allowedInRadius);
@@ -1887,8 +2863,10 @@
             const code = String(c.code);
             if (selected.has(code)) continue;
             const p = PRE.get(code); if (!p) continue;
+            const t = getEnabledMediaTotalsForTown(code);
 
-            const nextY = totalYen + p.yen, nextC = totalCps + p.cps;
+            const nextY = totalYen + t.yen;
+            const nextC = totalCps + t.cps;
             if ((targetYen>0 && nextY>targetYen) || (targetCopies>0 && nextC>targetCopies)) continue;
 
             const nextAgg = {
@@ -1918,7 +2896,11 @@
           order = getInitialSeeds(allowedInRadius);
 
           step++;
-          if ((step % 50) === 0){ updateAggregates(); await sleep(0); }
+          if ((step % 50) === 0){
+            updateAggregates();
+            updateAttrMetrics();
+            await sleep(0); 
+          }
         }
         updateAggregates();
 
@@ -1954,17 +2936,1167 @@
       }
     }
 
-    // 実行ボタン
-    document.getElementById("runAutoBtn").addEventListener("click", async () => {
-      const t = getTargets();
-      if (!anyTargetEntered(t)) {
-        await runDistanceFirst();
+    // ★ チェックされている属性キーを配列で返す
+    function getSelectedAttributeKeys() {
+      const box = $("attributeSelectBox");
+      if (!box) return [];
+
+      const keys = [];
+      box.querySelectorAll(".attr-checkbox:checked").forEach(chk => {
+        const key = chk.getAttribute("data-attr-key");
+        if (key != null && key !== "") {
+          keys.push(key);
+        }
+      });
+      return keys;
+    }
+
+    // ★ 選択されている属性を <summary> に要約表示
+    function updateAttrSummaryLabel() {
+      const box = $("attributeSelectBox");
+      if (!box) return;
+
+      const details = box.closest("details");
+      if (!details) return;
+
+      const summaryEl = details.querySelector("summary");
+      if (!summaryEl) return;
+
+      const keys = getSelectedAttributeKeys();
+
+      if (!keys.length) {
+        // 何も選ばれていないときは元の表示に戻す
+        summaryEl.textContent = "重視する属性を選択";
       } else {
-        await runGrowToTargets();
+        // 選ばれた属性だけを表示
+        summaryEl.textContent = "重視する属性：" + keys.join(" / ");
       }
+    }
+
+
+    // ★ 基準の町 / 全媒体対象 / 媒体別の属性比較テーブル
+    function updateAttrMetrics() {
+      const box = $("attrMetrics");
+      if (!box) return;
+
+      if (!townIndex || !townIndex.size) {
+        box.textContent = "町マスタの読み込み完了後に表示されます。";
+        return;
+      }
+
+      const attrKeys = getSelectedAttributeKeys();  // 選択された属性列
+      const selectedCodes = Array.from(selected).map(String);
+
+      if (!selectedCodes.length) {
+        box.textContent = "基準ビューで 1 件以上の町を選択すると、ここに指標比較を表示します。";
+        return;
+      }
+
+      const baseStr = baseCode ? String(baseCode) : null;
+
+      // ▼ 有効な媒体名（ON/OFF問わず「選択中の町に出ている媒体」全部）
+      const mediaNamesInSelection = new Set();
+      if (mediaIndex) {
+        for (const code of selectedCodes) {
+          const rowsForTown = mediaIndex.get(String(code)) || [];
+          for (const r of rowsForTown) {
+            const mName = r["媒体名"] ?? "(名称不明)";
+            mediaNamesInSelection.add(mName);
+          }
+        }
+      }
+      const allMediaNames = Array.from(mediaNamesInSelection)
+        .sort((a, b) => a.localeCompare(b, "ja"));
+
+      // ▼ 「全媒体対象」用：基準ONの各媒体の「全選択町」のユニオンを作る
+      const allMediaTargetSet = new Set();
+      let allMediaTargetCopies = 0;
+
+      if (mediaIndex && mediaCodesAllByName) {
+        for (const [name, allCodesForMedia] of mediaCodesAllByName.entries()) {
+          // OFF の媒体は対象外
+          if (!isMediaEnabled(name)) continue;
+
+          const explicitSet = mediaViewByName.get(name);
+          let codesForSum;
+
+          if (explicitSet) {
+            // 媒体ビューで明示的に選択された町
+            codesForSum = explicitSet;
+          } else if (selected.size > 0) {
+            // まだ媒体ごとの選択が無い場合は、基準ビューで選択されている町だけ
+            codesForSum = new Set(
+              [...allCodesForMedia].map(String).filter(c => selected.has(c))
+            );
+          } else {
+            // 何も選択されていない場合は、その媒体が出ている全域f
+            codesForSum = new Set([...allCodesForMedia].map(String));
+          }
+
+          // この媒体で「対象」となっている町をユニオンに追加しつつ、
+          // その媒体分の部数だけを合計する
+          for (const code of codesForSum) {
+            const cStr = String(code);
+            allMediaTargetSet.add(cStr);
+
+            const rowsForTown = mediaIndex.get(cStr) || [];
+            for (const r of rowsForTown) {
+              const rName = r["媒体名"] ?? "(名称不明)";
+              if (rName !== name) continue;
+              allMediaTargetCopies += toNumber(r["部数"]);
+            }
+          }
+        }
+      }
+
+      const allMediaTargetCodes = Array.from(allMediaTargetSet);
+
+      // ▼ 指標計算ユーティリティ
+      // codes       : 対象とする町コード配列
+      // mediaFilter : null のとき「対象ONの全媒体」、文字列（媒体名）のときその媒体だけ
+      // options     : { ignoreMediaView: true } だと媒体ビューでの町選択を無視して集計
+      function calcMetrics(codes, mediaFilter = null, options = {}) {
+        const ignoreMediaView = !!(options && options.ignoreMediaView);
+
+        // 対象町がなければ全部ゼロ
+        if (!codes || !codes.length) {
+          return {
+            hhTotal: 0,
+            popTotal: 0,
+            copiesTotal: 0,
+            priceTotal: 0,
+            avgAge: null,
+            maleAvgAge: null,
+            femaleAvgAge: null,
+            avgIncome: null,
+            carRate: null,
+            subRate: null,
+            attrHhRate: null,
+            attrPopRate: null,
+            hasAttr: !!attrKeys.length,
+            viewRate: null,
+            visitRaw: null,
+            costPerVisit: null
+          };
+        }
+
+        // ========= 業態別媒体別指数（cap）を準備 =========
+        let categories = null;  // この業態で使う「媒体カテゴリ」集合
+        let mediaCap   = null;  // 媒体カテゴリ → cap(0.3〜1.0)
+
+        const typeSel = document.getElementById("typeSelect");
+        if (typeMasterByGyotai && typeSel && typeSel.value) {
+          const rows = typeMasterByGyotai.get(typeSel.value) || [];
+          if (rows.length) {
+            categories = new Set();
+            mediaCap   = new Map();
+
+            // 貢献度の絶対値の最大を取る
+            let maxAbsContrib = 0;
+            for (const r of rows) {
+              const contrib = Number(r["貢献度"] ?? 0);
+              if (!Number.isFinite(contrib)) continue;
+              const abs = Math.abs(contrib);
+              if (abs > maxAbsContrib) maxAbsContrib = abs;
+            }
+            const denom = maxAbsContrib || 1;
+
+            // 媒体カテゴリごとの cap（0.3〜1.0）を計算
+            for (const r of rows) {
+              const cat = String(r["媒体"] ?? "").trim();
+              if (!cat) continue;
+
+              const contrib = Number(r["貢献度"] ?? 0);
+              const abs = Math.max(0, Math.abs(contrib));
+              const normalized = abs / denom;        // 0〜1
+              const cap = 0.3 + 0.7 * normalized;    // 0.3〜1.0
+
+              const prev = mediaCap.get(cat);
+              mediaCap.set(cat, prev != null ? Math.max(prev, cap) : cap);
+              categories.add(cat);
+            }
+          }
+        }
+
+        // 業態が選択されていて、かつ cap が作れたときだけ業態ロジックを使う
+        const useGyotaiCaps =
+          !!(categories && categories.size && mediaCap && mediaCap.size);
+
+        // ========= 共通集計部分 =========
+        let hhTotal = 0;
+        let popTotal = 0;
+        let copiesTotal = 0;
+        let priceTotal = 0;
+
+        let carWeighted = 0;
+        let carDen = 0;
+
+        let ageW = 0, ageN = 0;
+        let incW = 0, incN = 0;
+
+        let maleAgeW = 0, maleAgeN = 0;
+        let femaleAgeW = 0, femaleAgeN = 0;
+
+        let attrTotal = 0;
+
+        // 推測視認率・来店期待値用
+        let hhSumForView = 0;
+        let seenSum = 0;
+        let visitRaw = 0;
+
+        const baseStr = baseCode ? String(baseCode) : null;
+        const centerLngLat =
+          lastClickLngLat ||
+          (baseStr ? (PRE.get(baseStr)?.centroid || centroidOf(baseStr)) : null) ||
+          getMapCenterLngLat();
+
+        for (const code0 of codes) {
+          const codeStr = String(code0);
+          const row = townIndex.get(codeStr);
+          if (!row) continue;
+
+          const hh  = toNumber(row[HH_TOTAL_KEY]  ?? 0);
+          const pop = toNumber(row[POP_TOTAL_KEY] ?? 0);
+          hhTotal  += hh;
+          popTotal += pop;
+
+          // 自動車保有率（世帯加重平均）
+          const car = toNumber(row[CAR_AVG_KEY] ?? 0);
+          if (hh > 0 && Number.isFinite(car)) {
+            carWeighted += car * hh;
+            carDen      += hh;
+          }
+
+          // 事前計算済みの平均年齢・年収など
+          const p = PRE.get(codeStr);
+          if (p) {
+            ageW += p.ageW;
+            ageN += p.ageN;
+            incW += p.incW;
+            incN += p.incN;
+
+            maleAgeW   += p.maleW;
+            maleAgeN   += p.maleN;
+            femaleAgeW += p.femaleW;
+            femaleAgeN += p.femaleN;
+          }
+
+          // 属性列の合計
+          if (attrKeys.length) {
+            let attrSumTown = 0;
+            for (const key of attrKeys) {
+              attrSumTown += toNumber(row[key]);
+            }
+            attrTotal += attrSumTown;
+          }
+
+          // -------- 媒体ごとの部数・料金・coverage --------
+          let copiesInTown = 0;
+          let priceInTown  = 0;
+
+          let notSeenProd = 1;        // 「見ない確率」の積
+          let hasAnyCapMedia = false; // 業態に紐づく有効媒体があるか
+
+          const rowsForTown = mediaIndex ? (mediaIndex.get(codeStr) || []) : [];
+
+          for (const mr of rowsForTown) {
+            const mediaName = mr["媒体名"] ?? "(名称不明)";
+
+            // 媒体ON/OFF + mediaFilter
+            if (mediaFilter) {
+              // 媒体行：この媒体だけ
+              if (mediaName !== mediaFilter) continue;
+              if (!isMediaEnabled(mediaName)) continue;
+            } else {
+              // 基準行・全媒体行：対象ONの媒体だけ
+              if (!isMediaEnabled(mediaName)) continue;
+            }
+
+            // 媒体ビューでの町選択を反映（ignoreMediaView のときは無視）
+            if (!ignoreMediaView &&
+                typeof mediaViewByName !== "undefined" && mediaViewByName) {
+              const set = mediaViewByName.get(mediaName);
+              if (set && !set.has(codeStr)) continue;
+            }
+
+
+            const cps   = toNumber(mr["部数"]);
+            const price = toNumber(mr["料金"]);
+
+            copiesInTown += cps;
+            priceInTown  += price;
+
+            // 業態指数を使う場合だけ、視認率ロジックに乗せる
+            if (useGyotaiCaps && hh > 0 && cps > 0) {
+              const cat = String(mr["分類"] ?? "").trim();
+              if (!categories.has(cat)) {
+                // この業態に紐づかない媒体は視認率には効かせない（部数・料金には加算済み）
+                continue;
+              }
+
+              const cap = mediaCap.get(cat);
+              if (!cap || cap <= 0) continue;
+
+              let baseCov = cps / hh;
+              if (baseCov > 1) baseCov = 1;
+              if (baseCov <= 0) continue;
+
+              let cov = baseCov * cap;   // 0〜cap
+              if (cov > 1) cov = 1;
+              if (cov <= 0) continue;
+
+              hasAnyCapMedia = true;
+              notSeenProd *= (1 - cov);  // 見ない確率を掛けていく
+            }
+          }
+
+          // 全体用の部数・料金合計
+          copiesTotal += copiesInTown;
+          priceTotal  += priceInTown;
+
+          // ---- 業態が選択されているときだけ「推測視認率」「来店期待値」を計算 ----
+          if (useGyotaiCaps && centerLngLat && hh > 0 && hasAnyCapMedia) {
+            const coverageTown = 1 - notSeenProd;  // 0〜1
+            if (coverageTown > 0) {
+              hhSumForView += hh;
+              seenSum      += hh * coverageTown;
+
+              const pTown = PRE.get(codeStr);
+              const centroid = pTown?.centroid || centroidOf(codeStr);
+              if (centroid) {
+                const dKm = distMeters(centerLngLat, centroid) / 1000;
+                const decay = 1 / (1 + dKm);       // 業態指標と同じ距離減衰
+                visitRaw += hh * coverageTown * decay;
+              }
+            }
+          }
+        }
+
+        const hasAttr = !!attrKeys.length;
+        const avgAge       = ageN       ? (ageW       / ageN)       : null;
+        const maleAvgAge   = maleAgeN   ? (maleAgeW   / maleAgeN)   : null;
+        const femaleAvgAge = femaleAgeN ? (femaleAgeW / femaleAgeN) : null;
+        const avgIncome    = incN       ? (incW       / incN)       : null;
+        const carRate      = carDen     ? (carWeighted / carDen)    : null;
+        const subRate      = (hhTotal > 0 && copiesTotal > 0) ? (copiesTotal / hhTotal) : null;
+        const attrHhRate   = hasAttr && hhTotal  > 0 && attrTotal > 0 ? (attrTotal / hhTotal)  : null;
+        const attrPopRate  = hasAttr && popTotal > 0 && attrTotal > 0 ? (attrTotal / popTotal) : null;
+
+        // ★ 業態が選択されていないときは viewRate / visitRaw は null のまま
+        const viewRate    = (hhSumForView > 0 && seenSum > 0) ? (seenSum / hhSumForView) : null;
+        const visitMetric = (visitRaw > 0) ? visitRaw : null;
+        const costPerVisit =
+          (visitMetric && priceTotal > 0)
+            ? (priceTotal / visitMetric)
+            : null;
+
+        return {
+          hhTotal,
+          popTotal,
+          copiesTotal,
+          priceTotal,
+          avgAge,
+          maleAvgAge,
+          femaleAvgAge,
+          avgIncome,
+          carRate,
+          subRate,
+          attrHhRate,
+          attrPopRate,
+          hasAttr,
+          // 業態指数 cap を掛けた推測視認率・来店期待値・コスパ
+          viewRate,
+          visitRaw: visitMetric,
+          costPerVisit
+        };
+      }
+
+
+      const fmtInt = (v) => {
+        if (v == null || !Number.isFinite(v)) return "-";
+        return Math.round(v).toLocaleString();
+      };
+      const fmt1 = (v, unit = "") => {
+        if (v == null || !Number.isFinite(v)) return "-";
+        const n = Math.round(v * 10) / 10;
+        return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + unit;
+      };
+      const fmtPct = (v) => {
+        if (v == null || !Number.isFinite(v)) return "-";
+        const n = Math.round(v * 1000) / 10;
+        return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+      };
+
+      // ▼ コスパ計算用の「基準の町だけの指数/世帯数」を準備
+      let baseMetricAll = null;                  // 全媒体対象用
+      const baseMetricByMedia = new Map();       // 媒体名 → 基準値
+
+      if (baseStr && townIndex.has(baseStr)) {
+        // 全媒体対象の基準値（業態選択時は来店期待値、なければ世帯数）
+        const baseAllMetrics = calcMetrics([baseStr], null, { ignoreMediaView: true });
+        if (baseAllMetrics) {
+          if (baseAllMetrics.visitRaw && baseAllMetrics.visitRaw > 0) {
+            // 業態選択時：基準の町の「来店期待値」
+            baseMetricAll = baseAllMetrics.visitRaw;
+          } else if (baseAllMetrics.hhTotal > 0) {
+            // 業態未選択時：基準の町の「世帯数」
+            baseMetricAll = baseAllMetrics.hhTotal;
+          }
+        }
+
+        // 媒体ごとの基準値
+        for (const name of allMediaNames) {
+          const mBase = calcMetrics([baseStr], name, { ignoreMediaView: true });
+          if (!mBase) continue;
+
+          let denom = null;
+          if (mBase.visitRaw && mBase.visitRaw > 0) {
+            // 業態選択時：この媒体の来店期待値（基準の町だけ）
+            denom = mBase.visitRaw;
+          } else if (mBase.hhTotal > 0) {
+            // 業態未選択時：この媒体の世帯数（基準の町だけ）
+            denom = mBase.hhTotal;
+          }
+
+          if (denom != null && Number.isFinite(denom) && denom > 0) {
+            baseMetricByMedia.set(name, denom);
+          }
+        }
+      }
+
+
+      // ▼ 各行データを構築
+      const rowsData = [];
+
+      // 基準の町行
+      if (baseStr && townIndex.has(baseStr)) {
+        const row = townIndex.get(baseStr);
+        const baseName =
+          `${row["市区町村名"] ?? ""} ${row["町丁目名"] ?? ""}`.trim() || baseStr;
+
+        const metricsBase = calcMetrics(selectedCodes, null);
+
+        // ★ 業態が選ばれているときは、上部の業態指標と同じ値で上書き
+        const typeSel = document.getElementById("typeSelect");
+        if (typeSel && typeSel.value) {
+          const gy = computeGyotaiMetrics(typeSel.value);
+          if (gy && gy.viewRate != null && gy.visitRaw != null) {
+            metricsBase.viewRate = gy.viewRate;
+            metricsBase.visitRaw = gy.visitRaw;
+            if (metricsBase.priceTotal > 0 && gy.visitRaw > 0) {
+              metricsBase.costPerVisit = metricsBase.priceTotal / gy.visitRaw;
+            } else {
+              metricsBase.costPerVisit = null;
+            }
+          } else {
+            metricsBase.viewRate = null;
+            metricsBase.visitRaw = null;
+            metricsBase.costPerVisit = null;
+          }
+        } else {
+          // 業態未選択時は指数は出さない
+          metricsBase.viewRate = null;
+          metricsBase.visitRaw = null;
+          metricsBase.costPerVisit = null;
+        }
+
+        rowsData.push({
+          kind: "base",
+          label: "基準の町",
+          mediaName: null,
+          enabled: true,
+          metrics: metricsBase
+        });
+      }
+
+
+
+      // --- 全媒体対象（対象ONの媒体のみ）---
+      if (allMediaTargetCodes.length) {
+        const metricsAll = calcMetrics(allMediaTargetCodes, null);
+
+        // 部数と世帯比率購読率だけは、
+        // 「基準ONの各媒体の全選択町」を反映した値で上書きする
+        metricsAll.copiesTotal = allMediaTargetCopies;
+        metricsAll.subRate =
+          (metricsAll.hhTotal > 0 && allMediaTargetCopies > 0)
+            ? (allMediaTargetCopies / metricsAll.hhTotal)
+            : null;
+
+        rowsData.push({
+          kind: "all",
+          label: "全媒体対象",
+          mediaName: null,
+          enabled: true,
+          metrics: metricsAll
+        });
+      }
+
+      // --- 媒体ごと（ON/OFFに関わらず行は必ず出す）---
+      if (mediaIndex && allMediaNames.length) {
+        for (const name of allMediaNames) {
+          const enabled = isMediaEnabled(name);
+
+          // ★ まず「この媒体の選択町セット」を媒体ビュー側から取得
+          //    - 一度でも媒体ビューで触った媒体：必ず Set が存在
+          //    - まだ触っていない媒体：undefined のまま
+          let codesForMedia = [];
+          const set = mediaViewByName.get(name);
+
+          if (set) {
+            // セットが存在する = 媒体ビューで一度は触っている
+            // （全部外して 0 件になっていても、その 0 件が正解）
+            codesForMedia = Array.from(set).map(String);
+          } else {
+            // まだ媒体ビューで触っていない媒体は、
+            // 「基準ビューで選択されている町のうち、この媒体が出ている町」
+            // を今までどおり対象にする
+            for (const code of selectedCodes) {
+              const rowsForTown = mediaIndex.get(String(code)) || [];
+              const hasThis = rowsForTown.some(r => {
+                const mName = r["媒体名"] ?? "(名称不明)";
+                return mName === name;
+              });
+              if (hasThis) codesForMedia.push(String(code));
+            }
+          }
+
+          let metrics;
+          if (codesForMedia.length) {
+            metrics = calcMetrics(codesForMedia, name);
+          } else {
+            // 配布していない / 媒体ビューで全部外された媒体は完全ゼロ
+            metrics = {
+              hhTotal: 0,
+              popTotal: 0,
+              copiesTotal: 0,
+              priceTotal: 0,
+              avgAge: null,
+              maleAvgAge: null,
+              femaleAvgAge: null,
+              avgIncome: null,
+              carRate: null,
+              subRate: null,
+              attrHhRate: null,
+              attrPopRate: null,
+              hasAttr: !!attrKeys.length,
+              // 推測視認率・来店期待値・コスパも空
+              viewRate: null,
+              visitRaw: null,
+              costPerVisit: null
+            };
+          }
+
+
+          rowsData.push({
+            kind: "media",
+            label: name,
+            mediaName: name,
+            enabled,
+            metrics
+          });
+        }
+      }
+
+      // --- コスパを「基準の町だけの指数/世帯数」で上書き ---
+      if (baseStr && townIndex.has(baseStr)) {
+        for (const row of rowsData) {
+          const m = row.metrics;
+          if (!m) continue;
+
+          if (row.kind === "all") {
+            // 全媒体対象：基準の町の全媒体指数/世帯数で割る
+            if (baseMetricAll != null &&
+                Number.isFinite(baseMetricAll) &&
+                baseMetricAll > 0 &&
+                m.priceTotal > 0) {
+              m.costPerVisit = m.priceTotal / baseMetricAll;
+            } else {
+              m.costPerVisit = null;
+            }
+          } else if (row.kind === "media") {
+            // 各媒体：基準の町のその媒体の指数/世帯数で割る
+            const denom = baseMetricByMedia.get(row.mediaName);
+            if (denom != null &&
+                Number.isFinite(denom) &&
+                denom > 0 &&
+                m.priceTotal > 0) {
+              m.costPerVisit = m.priceTotal / denom;
+            } else {
+              m.costPerVisit = null;
+            }
+          }
+          // row.kind === "base" は今まで通り（触らない）
+        }
+      }
+
+      if (!rowsData.length) {
+        box.textContent = "ON になっている媒体が選択中の町に存在しません。";
+        return;
+      }
+
+
+      if (!rowsData.length) {
+        box.textContent = "ON になっている媒体が選択中の町に存在しません。";
+        return;
+      }
+
+      // ▼ テーブルHTML組み立て
+      const headerHtml = `
+        <tr>
+          <th>ビュー</th>
+          <th>対象</th>
+          <th>媒体</th>
+          <th>部数</th>
+          <th>料金</th>
+          <th>平均年齢</th>
+          <th>男平均年齢</th>
+          <th>女平均年齢</th>
+          <th>平均年収</th>
+          <th>自動車保有率</th>
+          <th>世帯総数</th>
+          <th>人口総数</th>
+          <th>世帯比率購読率</th>
+          <th>属性世帯比率</th>
+          <th>属性人口比率</th>
+          <!-- ★ ここから追加 -->
+          <th>推測視認率</th>
+          <th>来店期待値</th>
+          <th>コスパ</th>
+          <!-- ★ ここまで追加 -->
+        </tr>
+      `;
+
+
+      const bodyHtml = rowsData.map((row, idx) => {
+        const m = row.metrics;
+        const isMedia = row.kind === "media";
+        const isBase  = row.kind === "base";
+
+        const isViewOn =
+          (row.kind === "base"  && viewMode === "base") ||
+          (row.kind === "media" && viewMode === "media" && currentMediaName === row.mediaName);
+
+        // ビュー用チェック：基準の町＆媒体行に表示
+        let viewCell = "";
+        if (isBase || isMedia) {
+          const dataAttrs = isMedia
+            ? `data-scope-kind="media" data-media-name="${escHtml(row.mediaName)}"`
+            : `data-scope-kind="base"`;
+          viewCell = `
+            <input
+              type="checkbox"
+              class="attr-view-check"
+              ${dataAttrs}
+              ${isViewOn ? "checked" : ""}
+            >
+          `;
+        }
+
+        // 対象チェック：媒体行だけ
+        let targetCell = "";
+        if (isMedia) {
+          targetCell = `
+            <input
+              type="checkbox"
+              class="attr-target-check"
+              data-media-name="${escHtml(row.mediaName)}"
+              ${row.enabled ? "checked" : ""}
+            >
+          `;
+        }
+
+        const rowAttrs = isMedia
+          ? `data-scope-kind="media" data-media-name="${escHtml(row.mediaName)}"`
+          : `data-scope-kind="${row.kind}"`;
+
+        const disabledClass = isMedia && !row.enabled ? " media-row-disabled" : "";
+
+        return `
+          <tr ${rowAttrs} class="${disabledClass}">
+            <td class="center">${viewCell}</td>
+            <td class="center">${targetCell}</td>
+            <td>${escHtml(row.label)}</td>
+            <td class="num">${fmtInt(m.copiesTotal)}</td>
+            <td class="num">${fmtInt(m.priceTotal)}</td>              <!-- ★ 料金 -->
+            <td class="num">${fmt1(m.avgAge, "歳")}</td>
+            <td class="num">${fmt1(m.maleAvgAge, "歳")}</td>          <!-- ★ 男平均年齢 -->
+            <td class="num">${fmt1(m.femaleAvgAge, "歳")}</td>        <!-- ★ 女平均年齢 -->
+            <td class="num">${fmt1(m.avgIncome, "万円")}</td>
+            <td class="num">${fmt1(m.carRate, "台")}</td>
+            <td class="num">${fmtInt(m.hhTotal)}</td>
+            <td class="num">${fmtInt(m.popTotal)}</td>
+            <td class="num">${fmtPct(m.subRate)}</td>
+            <td class="num">${m.hasAttr ? fmtPct(m.attrHhRate)  : "-"}</td>
+            <td class="num">${m.hasAttr ? fmtPct(m.attrPopRate) : "-"}</td>
+            <!-- ★ ここから追加 -->
+            <td class="num">${fmtPct(m.viewRate)}</td>
+            <td class="num">${fmtInt(m.visitRaw)}</td>
+            <td class="num">${fmt1(m.costPerVisit, "円/人")}</td>
+            <!-- ★ ここまで追加 -->
+
+          </tr>
+        `;
+      }).join("");
+
+      box.innerHTML = `
+        <div class="attr-metrics-scroll">
+          <table>
+            <thead>${headerHtml}</thead>
+            <tbody>${bodyHtml}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+
+
+    // ★ 属性優先：選択した属性の「人口比率」が高くなるように自動選択
+    async function runAttributeFocus() {
+      resetFrontierCaches();
+
+      const msg = $("selectMsg");
+      const attrKeys = getSelectedAttributeKeys();
+
+      const targetYen    = Math.round(toNumber($("budgetInput").value) * 10000);
+      const targetCopies = Math.round(toNumber($("copiesInput").value) * 10000);
+      const targetDist   = Math.round(toNumber($("distInput").value)   * 1000);
+
+      if (!townIndex || !allFeatures.length || !PRE.size) {
+        msg.textContent = "初期計算の完了を待っています。";
+        return;
+      }
+      if (!attrKeys.length) {
+        msg.textContent = "重視する属性を1つ以上選択してください。";
+        return;
+      }
+
+      // ビューは必ず基準ビューで実行
+      viewMode = "base";
+      applyViewSelection();
+
+      ensureBaseIfMissing();
+      updateBaseFeatureState();
+      renderTargetRadius();
+
+      // ★ スタート時に何も選択されていなければ中心点の町を先に選ぶ
+      ensureBaseTownSelectedForAuto(targetDist);
+      updateAggregates();
+      updateAttrMetrics();
+
+      beginAuto();
+      try {
+        $("budgetInput")?.classList.remove("hit");
+        $("copiesInput")?.classList.remove("hit");
+        $("distInput")?.classList.remove("hit");
+
+        const centerForRadius =
+          lastClickLngLat ??
+          centroidOf(baseCode || "") ??
+          getMapCenterLngLat();
+
+        // 半径制約（km → m）は既に targetDist に反映済み
+        let allowedInRadius = null;
+        if (targetDist > 0 && centerForRadius) {
+          allowedInRadius = new Set();
+          for (const f of allFeatures) {
+            const p = PRE.get(String(f.code));
+            if (!p) continue;
+            if (distMeters(centerForRadius, p.centroid) <= targetDist) {
+              allowedInRadius.add(String(f.code));
+            }
+          }
+        }
+        const inRadiusFast = (code) =>
+          !allowedInRadius || allowedInRadius.has(String(code));
+
+        // 属性値と母数人口を取り出す
+        function getAttrStat(code) {
+          const row = townIndex.get(String(code));
+          if (!row) return { attr: 0, basePop: 0 };
+          let attr = 0;
+          for (const key of attrKeys) {
+            attr += toNumber(row[key]);
+          }
+          const basePop = toNumber(row[POP_TOTAL_KEY] ?? 0);
+          return { attr, basePop };
+        }
+
+        let attrTotal = 0;
+        let popTotal  = 0;
+
+        // すでに選択されている町はスタート時から集計に含める（属性だけ）
+        for (const c of selected) {
+          if (!inRadiusFast(c)) continue;
+          const { attr, basePop } = getAttrStat(c);
+          attrTotal += attr;
+          popTotal  += basePop;
+        }
+
+        // ★ 料金・部数は「全媒体対象（対象ONのみ）」で集計
+        let { yen: totalYen, cps: totalCps } = getCurrentAllMediaTotals();
+
+        const baseStr = baseCode ? String(baseCode) : null;
+        const center  = centerForRadius;
+
+        // ★ 1件も選ばれていない場合は「属性比率が高い町」を最初に1件選ぶ
+        if (selected.size === 0) {
+          let bestFirst = null;
+
+          for (const f of allFeatures) {
+            const code = String(f.code);
+            if (!inRadiusFast(code)) continue;
+
+            const { attr, basePop } = getAttrStat(code);
+            if (basePop <= 0 || attr <= 0) continue;
+
+            // ★ ここも ON 媒体だけの全媒体対象を使う
+            const t = getEnabledMediaTotalsForTown(code);
+            const nextY = totalYen + t.yen;
+            const nextC = totalCps + t.cps;
+            if ((targetYen > 0 && nextY > targetYen) ||
+                (targetCopies > 0 && nextC > targetCopies)) {
+              continue;
+            }
+
+            const p = PRE.get(code);
+            const ratio = attr / basePop;
+            const d = center
+              ? distMeters(center, p?.centroid || centroidOf(code))
+              : 0;
+
+            if (!bestFirst ||
+                ratio > bestFirst.ratio ||
+                (ratio === bestFirst.ratio && d < bestFirst.d)) {
+              bestFirst = { code, ratio, d, attr, basePop, nextY, nextC };
+            }
+          }
+
+          if (!bestFirst) {
+            msg.textContent = "距離・予算条件内で選択した属性を持つ候補町が見つかりませんでした。";
+            finishAuto();
+            return;
+          }
+
+          selected.add(bestFirst.code);
+          attrTotal += bestFirst.attr;
+          popTotal  += bestFirst.basePop;
+          totalYen   = bestFirst.nextY;
+          totalCps   = bestFirst.nextC;
+
+          map.setFeatureState(
+            { source: "aichi", id: bestFirst.code },
+            { selected: true }
+          );
+          if (!seedLRU.has(bestFirst.code)) seedLRU.set(bestFirst.code, -1);
+          autoExpandMediaFromBaseTown(String(bestFirst.code));
+
+          if (!baseStr) {
+            baseCode = String(bestFirst.code);
+            updateBaseFeatureState();
+            renderTargetRadius();
+          }
+
+          updateAggregates();
+          await sleep(0);
+        }
+
+        let order = getInitialSeeds(allowedInRadius);
+        let stoppedBy = null;
+        let step = 0;
+
+        while (true) {
+          if (STOP.requested) {
+            stoppedBy = "stop";
+            break;
+          }
+
+          // いまの frontier を構築
+          const frontier = new Map();
+          for (const base of order) {
+            if (isCornerExhausted(base)) continue;
+            const n = nearestUnpickedFast(base, selected);
+            if (n) frontier.set(n.code, n);
+          }
+          if (frontier.size === 0) {
+            stoppedBy = allowedInRadius ? "dist" : "no-candidate";
+            break;
+          }
+
+          const list = [...frontier.values()];
+          const cand = list.filter(n => inRadiusFast(n.code));
+          if (allowedInRadius && cand.length === 0) {
+            stoppedBy = "dist";
+            break;
+          }
+
+          // ★ ここから：まず「スコア対象の町」を優先し、
+          //    見つからなければ「スコア対象外の町」から距離優先で拾う
+          let best = null;
+          const fallbackCandidates = [];
+          const candidates = cand.length ? cand : list;
+
+          for (const c of candidates) {
+            const code = String(c.code);
+            if (selected.has(code)) continue;
+
+            const { attr, basePop } = getAttrStat(code);
+
+            const t = getEnabledMediaTotalsForTown(code);
+            const nextY = totalYen + t.yen;
+            const nextC = totalCps + t.cps;
+
+            const newAttr = attrTotal + attr;
+            const newPop  = popTotal + basePop;
+
+            // ★ スコア計算の対象外（attr/pop が乗らないもの）は
+            //    いったん fallback に退避しておく
+            if ((basePop <= 0 && attr <= 0) || newPop <= 0) {
+              fallbackCandidates.push({
+                code,
+                d: c.d,
+                addAttr: attr,
+                addPop: basePop,
+                nextY,
+                nextC
+              });
+              continue;
+            }
+
+            // ここからは「属性比率」でスコアリング
+            const newRatio = newAttr / newPop;
+            const score = newRatio; // 高いほど良い
+
+            if (!best ||
+                score > best.score ||
+                (score === best.score && c.d < best.d)) {
+              best = {
+                code,
+                score,
+                d: c.d,
+                attr,
+                basePop,
+                nextY,
+                nextC
+              };
+            }
+          }
+
+          if (!best) {
+            // ★ スコア対象の町が 0 件だった場合、
+            //    さっき退避しておいた「スコア対象外」の町から
+            //    距離が近い順に 1 件だけ拾う
+            if (fallbackCandidates.length) {
+              fallbackCandidates.sort((a, b) => a.d - b.d);
+              const f = fallbackCandidates[0];
+
+              selected.add(f.code);
+              attrTotal += f.addAttr;
+              popTotal  += f.addPop;
+              totalYen   = f.nextY;
+              totalCps   = f.nextC;
+
+              map.setFeatureState(
+                { source: "aichi", id: f.code },
+                { selected: true }
+              );
+              if (!seedLRU.has(f.code)) seedLRU.set(f.code, -1);
+              autoExpandMediaFromBaseTown(String(f.code));
+
+              // 次ループ用にシードを再構築して継続
+              order = getInitialSeeds(allowedInRadius);
+              step++;
+              if ((step % 50) === 0) {
+                updateAggregates();
+                updateAttrMetrics();
+                await sleep(0);
+              }
+
+              // ★ ここで「追加後に超えたか」をチェック
+              if (targetYen > 0 && totalYen >= targetYen) {
+                stoppedBy = "yen";
+                break;
+              }
+              if (targetCopies > 0 && totalCps >= targetCopies) {
+                stoppedBy = "copies";
+                break;
+              }
+
+              continue; // while(true) の先頭に戻る
+            }
+
+            // fallback も含めて本当に候補がない場合だけ終了
+            stoppedBy =
+              (targetYen > 0 || targetCopies > 0)
+                ? "budget/copies"
+                : (allowedInRadius ? "dist" : "no-candidate");
+            break;
+          }
+
+          // ★ ここからは通常の「best」（スコア対象の町）を採用
+          selected.add(best.code);
+          attrTotal += best.attr;
+          popTotal  += best.basePop;
+          totalYen   = best.nextY;
+          totalCps   = best.nextC;
+
+          map.setFeatureState(
+            { source: "aichi", id: best.code },
+            { selected: true }
+          );
+          if (!seedLRU.has(best.code)) seedLRU.set(best.code, -1);
+          autoExpandMediaFromBaseTown(String(best.code));
+
+          order = getInitialSeeds(allowedInRadius);
+
+          // ★ ここで「追加後に超えたか」をチェック
+          if (targetYen > 0 && totalYen >= targetYen) {
+            stoppedBy = "yen";
+            break;
+          }
+          if (targetCopies > 0 && totalCps >= targetCopies) {
+            stoppedBy = "copies";
+            break;
+          }
+
+          step++;
+          if ((step % 50) === 0) {
+            updateAggregates();
+            updateAttrMetrics();
+            await sleep(0);
+          }
+        } // ← while(true) ここで閉じる
+
+        // ループ終了後のまとめ
+        updateAggregates();
+        updateAttrMetrics();
+
+        const ratioPercent =
+          popTotal > 0 ? (attrTotal / popTotal) * 100 : 0;
+        const totalYen10k    = Math.round(totalYen / 10000);
+        const totalCopies10k = Math.round(totalCps / 10000);
+
+        const yenHit    = (targetYen    > 0 && (stoppedBy === "yen"    || totalYen   >= targetYen));
+        const copiesHit = (targetCopies > 0 && (stoppedBy === "copies" || totalCps   >= targetCopies));
+        const distHit   = (targetDist   > 0 &&  stoppedBy === "dist");
+
+        $("budgetInput")?.classList.toggle("hit", yenHit);
+        $("copiesInput")?.classList.toggle("hit", copiesHit);
+        $("distInput")?.classList.toggle("hit", distHit);
+
+        const parts = [];
+        parts.push(`選択 ${selected.size}件`);
+        parts.push(`属性人口比率 ${ratioPercent.toFixed(1)}%`);
+
+        const tail = [];
+        if (targetYen > 0) {
+          tail.push(
+            `<span class="${yenHit ? "hitText" : ""}">料金 ${totalYen10k.toLocaleString()} / 目標 ${(targetYen/10000|0).toLocaleString()} 万円</span>`
+          );
+        }
+        if (targetCopies > 0) {
+          tail.push(
+            `<span class="${copiesHit ? "hitText" : ""}">部数 ${totalCopies10k.toLocaleString()} / 目標 ${(targetCopies/10000|0).toLocaleString()} 万部</span>`
+          );
+        }
+        if (targetDist > 0) {
+          tail.push(
+            `<span class="${distHit ? "hitText" : ""}">半径 ${(targetDist/1000|0).toLocaleString()} km内</span>`
+          );
+        }
+
+        msg.innerHTML =
+          `自動選択（属性優先）: ${parts.join(" | ")}` +
+          (tail.length ? " | " + tail.join(" | ") : "") +
+          (stoppedBy ? ` / 停止理由: ${stoppedBy}` : "");
+      } finally {
+        finishAuto();
+      }
+    }
+
+
+
+    document.getElementById("runAutoBtn").addEventListener("click", async () => {
+      // ★ 実行ボタンを押した瞬間に要約更新＋畳む
+      const attrBox = $("attributeSelectBox");
+      if (attrBox) {
+        updateAttrSummaryLabel();   // チェックされている属性名を summary に反映
+
+        const details = attrBox.closest("details");
+        if (details) {
+          details.open = false;     // ここで畳む（停止後ではなく実行時）
+        }
+      }
+
+      const attrKeys = getSelectedAttributeKeys();
+
+      if (attrKeys.length) {
+        // 属性あり → 属性優先ロジック
+        await runAttributeFocus();
+      } else {
+        // 属性なし → 距離優先ロジック
+        await runDistanceFirst();
+      }
+
       renderTargetRadius();
       updateBaseFeatureState();
     });
+
+
+
+
+    // レポート出力ボタン
+    document.getElementById("exportReportBtn")?.addEventListener("click", exportReportCsv);
+
+    
+    // ★ 提案レポート（印刷 / PDF）2段階式
+    document.getElementById("proposalReportBtn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("proposalReportBtn");
+      if (!btn) return;
+
+      // まだ HTML が準備できていない → 準備フェーズ
+      if (!pendingReportHtml) {
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "レポート準備中…";
+        btn.classList.remove("report-ready"); // 念のためリセット
+
+        const html = await buildProposalReportHtml();
+
+        btn.disabled = false;
+
+        if (!html) {
+          // 失敗したら元に戻す
+          btn.textContent = originalLabel;
+          btn.classList.remove("report-ready");
+          return;
+        }
+
+        pendingReportHtml = html;
+        btn.textContent = "レポートを開く";
+        btn.classList.add("report-ready");   // ★ ここで強調オン
+        return; // ← 一旦終了
+      }
+
+      // HTML 準備済み → レポートを開くフェーズ
+      const w = window.open("", "_blank");
+      if (!w) {
+        alert("ポップアップがブロックされました。\nブラウザの設定で localhost のポップアップを許可してください。");
+        return;
+      }
+
+      w.document.open();
+      w.document.write(pendingReportHtml);
+      w.document.close();
+
+      // 1回開いたらクリア＆ボタン表示を元に戻す
+      pendingReportHtml = null;
+      btn.textContent = "提案レポート（印刷 / PDF）";
+      btn.classList.remove("report-ready");   // ★ 強調オフ
+    });
+
+
+
 
     // ★ 業態ビューの描画本体（セレクト変更＆再計算ボタンから共通で呼ぶ）
     function renderTypeMetrics() {
@@ -2087,20 +4219,40 @@
     }
 
     // ★ セレクト変更時 & 再計算ボタン押下時に同じ処理を呼ぶ
-    $("typeSelect")?.addEventListener("change", renderTypeMetrics);
-    $("typeRecalcBtn")?.addEventListener("click", renderTypeMetrics);
+    function handleTypeMetricsChange() {
+      // 業態指標（上部の SHAP / 貢献度・推測視認率など）
+      renderTypeMetrics();
+      // 業態変更を反映した「選択した属性の媒体別属性値」を再計算
+      updateAttrMetrics();
+    }
 
+    $("typeSelect")?.addEventListener("change", handleTypeMetricsChange);
+    $("typeRecalcBtn")?.addEventListener("click", handleTypeMetricsChange);
 
     // 集計（現在のビューの集合を対象）
     function updateAggregates() {
       const currentSet = getActiveSet();
       const count = currentSet.size;
       const codes = Array.from(currentSet).map(String);
-      const zb = document.getElementById('zoomSelBtn'); if (zb) zb.disabled = count === 0;
 
+      // ★ 「選択にズーム」は常に色付きにするので、ここでは触らない
+      const zb = document.getElementById('zoomSelBtn');
+      if (zb) {
+        // zb.disabled も触らない（常に押せる）
+        // zb.classList.toggle('is-active', count > 0); // ← この行は削除
+      }
+
+      // 「全て解除」は今まで通り、選択件数で色を切替
+      const cb = document.getElementById('clearBtn');
+      if (cb) {
+        cb.classList.toggle('is-active', count > 0);
+      }
       if (!townIndex) {
         $("summary").innerHTML = `<span>選択</span><span>${count} 件（CSV準備中）</span>`;
-        $("topStats").innerHTML = ""; $("allStats").innerHTML = ""; $("picked").innerHTML = ""; $("mediaStats").innerHTML = "";
+        $("topStats").innerHTML = "";
+        $("allStats").innerHTML = "";
+        $("picked").innerHTML = "";
+        $("mediaStats").innerHTML = "";
         return;
       }
       const rows = codes.map(c => townIndex.get(c)).filter(Boolean);
@@ -2157,6 +4309,18 @@
       // 媒体（常に「媒体毎の選択町」の合計で集計）
       if (mediaIndex && mediaCodesAllByName) {
         const byName = new Map();
+        const isBaseView = (viewMode === "base");
+        const baseStr = baseCode ? String(baseCode) : null;
+
+        // ★ 基準町が持っている媒体名の一覧を作る
+        const baseMediaNames = new Set();
+        if (baseStr && mediaIndex.has(baseStr)) {
+          const baseRows = mediaIndex.get(baseStr) || [];
+          for (const r of baseRows) {
+            const mName = r["媒体名"] ?? "(名称不明)";
+            baseMediaNames.add(mName);
+          }
+        }
 
         // 媒体マスタに載っている全媒体を対象
         for (const [name, allCodesForMedia] of mediaCodesAllByName.entries()) {
@@ -2164,20 +4328,37 @@
           let codesForSum;
 
           if (explicitSet && explicitSet.size > 0) {
+            // 媒体ビューなどでユーザーが明示的に選択している町
             codesForSum = explicitSet;
-          } else {
-            codesForSum = new Set();
+          } else if (isBaseView) {
+            // ★基準ビューのときだけ、selected を fallback に使う
+            const s = new Set();
             for (const code of selected) {
               if (allCodesForMedia.has(String(code))) {
-                codesForSum.add(String(code));
+                s.add(String(code));
               }
             }
+            codesForSum = s;
+          } else {
+            // ★媒体ビューで explicitSet が空のときは、
+            //   集計対象の町は「なし」だが行は 0 件で残したいので空 Set を使う
+            codesForSum = new Set();
           }
 
-          if (!codesForSum || codesForSum.size === 0) continue;
+          // ★この媒体を「表示すべきか？」の判定
+          const mustShow =
+            baseMediaNames.has(name) ||          // 基準町に出ている媒体は常に表示
+            name === currentMediaName ||         // 現在選択中の媒体は常に表示
+            (codesForSum && codesForSum.size > 0); // それ以外は、集計対象があるときだけ表示
+
+          // 集計対象がなく、かつ表示義務もなければスキップ
+          if (!mustShow && (!codesForSum || codesForSum.size === 0)) {
+            continue;
+          }
 
           let stat = { 件数: 0, 部数: 0, 料金: 0 };
 
+          // ★ codesForSum が空でも stat は 0 のまま → 行だけは表示される
           for (const code of codesForSum) {
             const rowsForTown = mediaIndex.get(String(code));
             if (!rowsForTown) continue;
@@ -2192,7 +4373,7 @@
             }
           }
 
-          if (stat.件数 === 0 && stat.部数 === 0 && stat.料金 === 0) continue;
+          // ★ここではもう「全部 0 なら continue」はしない
           byName.set(name, stat);
         }
 
@@ -2216,7 +4397,6 @@
             const btnLabel    = enabled ? "対象" : "除外中";
             const btnOffClass = enabled ? "" : "off";
 
-            // ★ media-row クラスと title を付与
             return `<tr data-media-name="${escapeAttr(name)}"
                        class="media-row ${rowClass}"
                        title="クリックでこの媒体のビューに切り替え">
@@ -2257,6 +4437,7 @@
         $("mediaStats").innerHTML = "（媒体データがありません）";
       }
 
+
       // 全数値列（合計・平均）
       const numericKeysHere2 = detectNumericKeys(rows.length ? [rows[0]] : []);
       if (numericKeysHere2.length) {
@@ -2275,21 +4456,1079 @@
       updateBaseFeatureState();
 
       // ★ 業態指標も常に最新にする
-      renderTypeMetrics();      
+      renderTypeMetrics();
+      updateAutoButtonHighlight();
+      updateAttrMetrics();
 
     }
+
+
+
+
+    // ★ 提案レポート（印刷 / PDF 用）の生成：HTML を返すだけ
+    async function buildProposalReportHtml() {
+      try {
+        // 念のため最新で集計
+        updateAggregates();
+
+        const activeSet = getActiveSet();
+        if (!activeSet.size) {
+          alert("レポート対象となる町が選択されていません。");
+          return null;
+        }
+        const codes = Array.from(activeSet).map(String);
+
+        // 入力値
+        const clientName = document.getElementById("clientNameInput")?.value || "";
+        const planTitle  = document.getElementById("planTitleInput")?.value  || "";
+        const periodText = document.getElementById("periodInput")?.value     || "";
+
+        const budgetText = document.getElementById("budgetInput")?.value     || "";
+        const copiesText = document.getElementById("copiesInput")?.value     || "";
+        const distText   = document.getElementById("distInput")?.value       || "";
+
+        const tAge       = document.getElementById("targetAge")?.value       || "";
+        const tAgeM      = document.getElementById("targetAgeMale")?.value   || "";
+        const tAgeF      = document.getElementById("targetAgeFemale")?.value || "";
+        const tIncome    = document.getElementById("targetIncome")?.value    || "";
+
+        const now = new Date();
+        const y  = now.getFullYear();
+        const m  = String(now.getMonth() + 1).padStart(2, "0");
+        const d  = String(now.getDate()).padStart(2, "0");
+        const hh = String(now.getHours()).padStart(2, "0");
+        const mm = String(now.getMinutes()).padStart(2, "0");
+
+        const viewLabel =
+          viewMode === "media"
+            ? `媒体ビュー（${currentMediaName || "媒体未選択"}）`
+            : "基準ビュー";
+
+        // ==== 地図キャプチャ（現在のビュー＋対象媒体ごと） ====
+
+        const mapImages = [];
+
+        function safeCapture(label) {
+          try {
+            if (map && map.getCanvas) {
+              const url = map.getCanvas().toDataURL("image/png");
+              if (url) {
+                mapImages.push({ label, dataUrl: url });
+              }
+            }
+          } catch (e) {
+            console.warn("地図キャプチャ失敗:", e);
+          }
+        }
+
+        // 現在の状態を退避
+        const savedViewMode        = viewMode;
+        const savedCurrentMedia    = currentMediaName;
+        const savedMediaViewSet    = new Set(mediaViewSet);
+        const savedSelected        = new Set(selected);
+
+        // 1) 現在のビューのまま 1 枚
+        await waitMapIdle();
+        safeCapture("現在のビュー");
+
+        // 2) 対象 ON の全媒体ごとのビュー
+        if (mediaCodesAllByName && mediaIndex) {
+          for (const [name, enabled] of mediaEnabledByName.entries()) {
+            if (!enabled) continue;
+            const allCodesForMedia = mediaCodesAllByName.get(name);
+            if (!allCodesForMedia || !allCodesForMedia.size) continue;
+
+            let set = mediaViewByName.get(name);
+            if (!set) {
+              if (savedSelected.size > 0) {
+                set = new Set(
+                  [...allCodesForMedia].filter(code => savedSelected.has(String(code)))
+                );
+              } else {
+                set = new Set();
+              }
+              mediaViewByName.set(name, set);
+            }
+
+            // この媒体で選択されている町がなければスキップ
+            if (!set || set.size === 0) {
+              continue;
+            }
+
+            mediaViewSet = new Set(set);
+            viewMode = "media";
+            currentMediaName = name;
+
+            applyViewSelection();
+            updateAggregates();
+            updateViewStatus();
+            await waitMapIdle();
+
+            safeCapture(`媒体ビュー：${name}`);
+          }
+        }
+
+        // ★ 状態を元に戻す
+        viewMode         = savedViewMode;
+        currentMediaName = savedCurrentMedia;
+        mediaViewSet     = new Set(savedMediaViewSet);
+        selected.clear();
+        savedSelected.forEach(c => selected.add(c));
+        applyViewSelection();
+        updateAggregates();
+        updateViewStatus();
+        await waitMapIdle();
+
+        // ==== ここからは元の集計ロジック（ほぼそのまま） ====
+
+        const rows = codes
+          .map(c => townIndex?.get(c))
+          .filter(Boolean);
+
+        if (!rows.length) {
+          alert("選択された町の情報が town_master に見つかりませんでした。");
+          return null;
+        }
+
+        let ageWeighted = 0, agePeople = 0;
+        let maleWeighted = 0, malePeople = 0;
+        let femaleWeighted = 0, femalePeople = 0;
+        let incWeighted = 0, incCount = 0;
+        const AGE_WIDTH = 5;
+        const incomeWidth = detectIncomeWidth(Object.keys(rows[0] || {}));
+
+        let popTotal = 0;
+        let hhTotal  = 0;
+        let carWeighted = 0, carDen = 0;
+
+        for (const r of rows) {
+          const hhVal = Number(r[HH_TOTAL_KEY]) || 0;
+          const pop   = Number(r[POP_TOTAL_KEY]) || 0;
+          popTotal += pop;
+          hhTotal  += hhVal;
+
+          const carAvg = Number(r[CAR_AVG_KEY]);
+          if (isFinite(carAvg)) {
+            carWeighted += carAvg * hhVal;
+            carDen      += hhVal;
+          }
+
+          for (const [k, v] of Object.entries(r)) {
+            const bandA = parseAgeBand(k, AGE_WIDTH);
+            if (bandA) {
+              const mid = (bandA.lo + bandA.hi) / 2;
+              const n   = Number(v) || 0;
+              ageWeighted += mid * n;
+              agePeople   += n;
+              const t = z2h(k);
+              if (/^男/.test(t)) {
+                maleWeighted += mid * n;
+                malePeople   += n;
+              } else if (/^女/.test(t)) {
+                femaleWeighted += mid * n;
+                femalePeople   += n;
+              }
+            }
+
+            const bandI = parseIncomeBand(k, incomeWidth);
+            if (bandI) {
+              const mid = (bandI.lo + bandI.hi) / 2;
+              const n   = Number(v) || 0;
+              incWeighted += mid * n;
+              incCount    += n;
+            }
+          }
+        }
+
+        const avgAge         = agePeople    ? (ageWeighted   / agePeople)    : 0;
+        const avgAgeMale     = malePeople   ? (maleWeighted  / malePeople)   : 0;
+        const avgAgeFemale   = femalePeople ? (femaleWeighted/ femalePeople) : 0;
+        const avgIncome      = incCount     ? (incWeighted   / incCount)     : 0;
+        const carAvgWeighted = carDen       ? (carWeighted   / carDen)       : 0;
+
+        let totalYen = 0;
+        let totalCps = 0;
+        for (const c of codes) {
+          const t = getEnabledMediaTotalsForTown(c);
+          totalYen += t.yen;
+          totalCps += t.cps;
+        }
+
+        const typeSel = document.getElementById("typeSelect");
+        let gyotaiName = "";
+        let gyotaiViewRate = null;
+        let gyotaiVisit    = null;
+
+        if (typeSel && typeSel.value) {
+          gyotaiName = typeSel.value;
+          const metrics = computeGyotaiMetrics(typeSel.value);
+          gyotaiViewRate = metrics.viewRate;
+          gyotaiVisit    = metrics.visitRaw;
+        }
+
+        const mediaSummary = [];
+        if (mediaIndex && mediaCodesAllByName) {
+          for (const [name, allCodesForMedia] of mediaCodesAllByName.entries()) {
+            if (!isMediaEnabled(name)) continue;
+
+            const explicitSet = mediaViewByName.get(name);
+            let codesForSum;
+
+            if (explicitSet && explicitSet.size > 0) {
+              codesForSum = explicitSet;
+            } else {
+              codesForSum = new Set();
+              for (const code of selected) {
+                if (allCodesForMedia.has(String(code))) {
+                  codesForSum.add(String(code));
+                }
+              }
+            }
+
+            if (!codesForSum.size) continue;
+
+            let count = 0, bu = 0, ry = 0;
+            for (const code of codesForSum) {
+              const rowsForTown = mediaIndex.get(String(code));
+              if (!rowsForTown) continue;
+              for (const r of rowsForTown) {
+                const rName = r["媒体名"] ?? "(名称不明)";
+                if (rName !== name) continue;
+                if (!isMediaEnabled(rName)) continue;
+
+                count += 1;
+                bu    += toNumber(r["部数"]);
+                ry    += toNumber(r["料金"]);
+              }
+            }
+
+            if (count || bu || ry) {
+              mediaSummary.push({ name, count, copies: bu, yen: ry });
+            }
+          }
+          mediaSummary.sort((a, b) => b.yen - a.yen);
+        }
+
+        const townDetails = [];
+        for (const c of codes) {
+          const row = townIndex.get(String(c));
+          if (!row) continue;
+
+          const name = `${row["市区町村名"] ?? ""} ${row["町丁目名"] ?? ""}`.trim();
+          const codeStr = String(row[CODE_KEY] ?? c);
+          const pop = Number(row[POP_TOTAL_KEY]) || 0;
+          const hhVal  = Number(row[HH_TOTAL_KEY])  || 0;
+
+          let mediaCount = 0, mediaBu = 0, mediaRy = 0;
+          if (mediaIndex) {
+            const rowsForTown = mediaIndex.get(String(c)) || [];
+            for (const r of rowsForTown) {
+              const mName = r["媒体名"] ?? "(名称不明)";
+              if (!isMediaEnabled(mName)) continue;
+              mediaCount += 1;
+              mediaBu    += toNumber(r["部数"]);
+              mediaRy    += toNumber(r["料金"]);
+            }
+          }
+
+          townDetails.push({
+            name,
+            code: codeStr,
+            pop,
+            hh: hhVal,
+            mediaCount,
+            mediaBu,
+            mediaRy
+          });
+        }
+        townDetails.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+
+        // ▼ グラフ用 HTML（媒体別棒グラフ＋円グラフ、町別散布図）
+        let chartsHtml = "";
+
+        if (mediaSummary.length || townDetails.length) {
+          // カラーパレット（媒体ごとの色）
+          const pieColors = [
+            "#3b82f6","#10b981","#f97316","#ec4899",
+            "#8b5cf6","#f59e0b","#ef4444","#14b8a6"
+          ];
+
+          // --- 媒体別ボリューム（棒グラフ：部数＆料金） ---
+          let mediaBarHtml = "";
+          if (mediaSummary.length) {
+            const maxCopies = Math.max(...mediaSummary.map(m => m.copies || 0));
+            const maxYen    = Math.max(...mediaSummary.map(m => m.yen    || 0));
+
+            mediaBarHtml = `
+              <div class="chart-card">
+                <h2>媒体別ボリューム（棒グラフ）</h2>
+                <div class="bar-chart">
+                  ${mediaSummary.map(m => {
+                    const copiesRatio = maxCopies ? (m.copies / maxCopies * 100) : 0;
+                    const yenRatio    = maxYen    ? (m.yen    / maxYen    * 100) : 0;
+                    return `
+                      <div class="bar-row">
+                        <div class="bar-label">${escHtml(m.name)}</div>
+                        <div class="bar-wrap">
+                          <div class="bar">
+                            <span style="width:${copiesRatio.toFixed(1)}%;"></span>
+                            <em>${Math.round(m.copies).toLocaleString()}部</em>
+                          </div>
+                          <div class="bar bar-yen">
+                            <span style="width:${yenRatio.toFixed(1)}%;"></span>
+                            <em>${Math.round(m.yen).toLocaleString()}円</em>
+                          </div>
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+                <div class="chart-caption">
+                  ※ 部数・料金ともに、それぞれ最大値の媒体を 100% とした相対比です。
+                </div>
+              </div>
+            `;
+          }
+
+          // --- 媒体別料金構成比（円グラフ） ---
+          let mediaPieHtml = "";
+          if (mediaSummary.length) {
+            const totalYen = mediaSummary.reduce((s, m) => s + (m.yen || 0), 0);
+            if (totalYen > 0) {
+              const radius = 80;
+              const cx = 100, cy = 100;
+              const circumference = 2 * Math.PI * radius;
+              let offset = 0;
+
+              const slices = mediaSummary.map((m, idx) => {
+                const value = m.yen || 0;
+                const ratio = value / totalYen;
+                const dash = ratio * circumference;
+                const dashArray = `${dash} ${circumference - dash}`;
+                const color = pieColors[idx % pieColors.length];
+                const slice = `
+                  <circle
+                    r="${radius}"
+                    cx="${cx}"
+                    cy="${cy}"
+                    fill="transparent"
+                    stroke="${color}"
+                    stroke-width="32"
+                    stroke-dasharray="${dashArray}"
+                    stroke-dashoffset="${-offset}"
+                  >
+                    <title>${escHtml(m.name)}
+${Math.round(value).toLocaleString()}円（${(ratio*100).toFixed(1)}%）</title>
+                  </circle>
+                `;
+                offset += dash;
+                return slice;
+              }).join("");
+
+              const legend = mediaSummary.map((m, idx) => {
+                const value = m.yen || 0;
+                const ratio = totalYen ? (value / totalYen * 100) : 0;
+                const color = pieColors[idx % pieColors.length];
+                return `
+                  <div class="chart-legend-item">
+                    <span class="chart-legend-swatch" style="background:${color};"></span>
+                    <span>${escHtml(m.name)}：${Math.round(value).toLocaleString()}円（${ratio.toFixed(1)}%）</span>
+                  </div>
+                `;
+              }).join("");
+
+              mediaPieHtml = `
+                <div class="chart-card">
+                  <h2>媒体別料金構成比（円グラフ）</h2>
+                  <div class="pie-wrapper">
+                    <svg class="pie-svg" viewBox="0 0 200 200">
+                      <circle r="${radius}" cx="${cx}" cy="${cy}" fill="#f3f4f6"></circle>
+                      ${slices}
+                    </svg>
+                    <div class="chart-legend">
+                      ${legend}
+                    </div>
+                  </div>
+                  <div class="chart-caption">
+                    ※ 選択中媒体の料金合計を 100% とした構成比です。
+                  </div>
+                </div>
+              `;
+            }
+          }
+
+          // --- 町別 世帯数×配布部数（散布図） ---
+          let scatterHtml = "";
+          if (townDetails.length) {
+            const maxHh = Math.max(...townDetails.map(t => t.hh || 0));
+            const maxBu = Math.max(...townDetails.map(t => t.mediaBu || 0));
+            const maxRy = Math.max(...townDetails.map(t => t.mediaRy || 0));
+            if (maxHh > 0 && maxBu > 0) {
+              const width = 360;
+              const height = 240;
+              const padLeft = 40, padRight = 10, padTop = 10, padBottom = 30;
+              const plotW = width - padLeft - padRight;
+              const plotH = height - padTop - padBottom;
+
+              const points = townDetails.map(t => {
+                if (!t.hh || !t.mediaBu) return "";
+                const x = padLeft + (t.hh / maxHh) * plotW;
+                const y = padTop + plotH - (t.mediaBu / maxBu) * plotH;
+                const r = 3 + (maxRy ? (t.mediaRy / maxRy) * 4 : 0);
+                return `
+                  <circle
+                    cx="${x.toFixed(1)}"
+                    cy="${y.toFixed(1)}"
+                    r="${r.toFixed(1)}"
+                    fill="rgba(59,130,246,0.75)"
+                  >
+                    <title>${escHtml(t.name)}
+世帯数：${t.hh.toLocaleString()}
+部数：${Math.round(t.mediaBu).toLocaleString()}部
+料金：${Math.round(t.mediaRy).toLocaleString()}円</title>
+                  </circle>
+                `;
+              }).join("");
+
+              scatterHtml = `
+                <div class="chart-card">
+                  <h2>町別 世帯数×配布部数（散布図）</h2>
+                  <svg class="scatter-svg" viewBox="0 0 ${width} ${height}">
+                    <!-- 枠 -->
+                    <rect x="${padLeft}" y="${padTop}" width="${plotW}" height="${plotH}" fill="#ffffff" stroke="#e5e7eb" />
+                    <!-- 軸ラベル -->
+                    <text x="${padLeft + plotW/2}" y="${height - 4}" font-size="11" text-anchor="middle">世帯数</text>
+                    <text x="12" y="${padTop + plotH/2}" font-size="11" text-anchor="middle" transform="rotate(-90 12 ${padTop + plotH/2})">配布部数</text>
+                    <!-- 目盛（0, 中央, 最大） -->
+                    <text x="${padLeft}" y="${height - 14}" font-size="10" text-anchor="start">0</text>
+                    <text x="${padLeft + plotW/2}" y="${height - 14}" font-size="10" text-anchor="middle">${Math.round(maxHh/2).toLocaleString()}</text>
+                    <text x="${padLeft + plotW}" y="${height - 14}" font-size="10" text-anchor="end">${maxHh.toLocaleString()}</text>
+
+                    <text x="${padLeft - 4}" y="${padTop + plotH}" font-size="10" text-anchor="end">0</text>
+                    <text x="${padLeft - 4}" y="${padTop + plotH/2}" font-size="10" text-anchor="end">${Math.round(maxBu/2).toLocaleString()}</text>
+                    <text x="${padLeft - 4}" y="${padTop + 8}" font-size="10" text-anchor="end">${maxBu.toLocaleString()}</text>
+
+                    ${points}
+                  </svg>
+                  <div class="chart-caption">
+                    ※ 各点は配布対象となる町を表し、円の大きさは料金規模の目安です。
+                  </div>
+                </div>
+              `;
+            }
+          }
+
+          if (mediaBarHtml || mediaPieHtml || scatterHtml) {
+            chartsHtml = `
+              <div class="chart-grid">
+                ${mediaBarHtml}
+                ${mediaPieHtml}
+                ${scatterHtml}
+              </div>
+            `;
+          }
+        }
+
+        const titleText = planTitle || "広告配布提案レポート";
+
+
+        let mediaTableHtml = "";
+        if (mediaSummary.length) {
+          mediaTableHtml = `
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>媒体名</th>
+                  <th>件数</th>
+                  <th>部数合計</th>
+                  <th>料金合計</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${mediaSummary.map(m => `
+                  <tr>
+                    <td>${escHtml(m.name)}</td>
+                    <td class="num">${m.count.toLocaleString()}件</td>
+                    <td class="num">${Math.round(m.copies).toLocaleString()}部</td>
+                    <td class="num">${Math.round(m.yen).toLocaleString()}円</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `;
+        } else {
+          mediaTableHtml = `<p class="muted">対象媒体が選択されていません。</p>`;
+        }
+
+        let townTableHtml = "";
+        if (townDetails.length) {
+          townTableHtml = `
+            <table class="data-table small">
+              <thead>
+                <tr>
+                  <th>市区町村・町丁目名</th>
+                  <th>町丁目コード</th>
+                  <th>人口</th>
+                  <th>世帯数</th>
+                  <th>媒体件数</th>
+                  <th>部数合計</th>
+                  <th>料金合計</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${townDetails.map(t => `
+                  <tr>
+                    <td>${escHtml(t.name)}</td>
+                    <td>${escHtml(t.code)}</td>
+                    <td class="num">${t.pop.toLocaleString()}</td>
+                    <td class="num">${t.hh.toLocaleString()}</td>
+                    <td class="num">${t.mediaCount.toLocaleString()}</td>
+                    <td class="num">${Math.round(t.mediaBu).toLocaleString()}</td>
+                    <td class="num">${Math.round(t.mediaRy).toLocaleString()}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `;
+        }
+        // ★ 媒体別グラフ（部数 / 料金）の HTML
+        let mediaChartHtml = "";
+        if (mediaSummary.length) {
+          const maxCopies = Math.max(...mediaSummary.map(m => m.copies || 0));
+          const maxYen    = Math.max(...mediaSummary.map(m => m.yen    || 0));
+
+          mediaChartHtml = `
+            <div class="card">
+              <h2>媒体別グラフ（部数 / 料金）</h2>
+              <div class="bar-chart">
+                ${mediaSummary.map(m => {
+                  const copiesRatio = maxCopies ? (m.copies / maxCopies * 100) : 0;
+                  const yenRatio    = maxYen    ? (m.yen    / maxYen    * 100) : 0;
+                  return `
+                    <div class="bar-row">
+                      <div class="bar-label">${escHtml(m.name)}</div>
+                      <div class="bar-wrap">
+                        <div class="bar bar-copies">
+                          <span style="width:${copiesRatio.toFixed(1)}%;"></span>
+                          <em>${Math.round(m.copies).toLocaleString()}部</em>
+                        </div>
+                        <div class="bar bar-yen">
+                          <span style="width:${yenRatio.toFixed(1)}%;"></span>
+                          <em>${Math.round(m.yen).toLocaleString()}円</em>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+              <div class="bar-legend">
+                ■ 青：部数（最大媒体を 100% とした比率） ／ ■ 緑：料金
+              </div>
+            </div>
+          `;
+        }
+
+
+        let gyotaiHtml = "";
+        if (gyotaiName) {
+          const vr = gyotaiViewRate != null ? (gyotaiViewRate * 100).toFixed(1) + "%" : "-";
+          const vi = gyotaiVisit    != null ? Math.round(gyotaiVisit).toLocaleString() : "-";
+          gyotaiHtml = `
+            <div class="card">
+              <h2>業態別来店期待</h2>
+              <table class="meta-table">
+                <tr><th>対象業態</th><td>${escHtml(gyotaiName)}</td></tr>
+                <tr><th>推測視認率</th><td>${vr}</td></tr>
+                <tr><th>来店期待値指数</th><td>${vi}</td></tr>
+              </table>
+              <p class="note">※ 選択中配布町と業態に紐づく媒体に基づき算出した指標です。</p>
+            </div>
+          `;
+        }
+
+        let mapBlockHtml = "";
+        if (mapImages.length) {
+          mapBlockHtml = `
+            <div class="map-card">
+              <h2>配布エリア地図</h2>
+              ${mapImages.map(img => `
+                <div style="margin-top:10px;">
+                  <div class="muted" style="margin-bottom:4px;">${escHtml(img.label)}</div>
+                  <img class="map-image" src="${img.dataUrl}" alt="${escHtml(img.label)}">
+                </div>
+              `).join("")}
+            </div>
+          `;
+        } else {
+          mapBlockHtml = `
+            <div class="map-card">
+              <h2>配布エリア地図</h2>
+              <p class="muted">ブラウザの制限により地図画像を取得できませんでした。必要に応じて画面キャプチャを貼り付けてください。</p>
+            </div>
+          `;
+        }
+
+        const docHtml = `
+          <!doctype html>
+          <html lang="ja">
+          <head>
+            <meta charset="utf-8" />
+            <title>${escHtml(titleText)}</title>
+            <style>
+              * { box-sizing: border-box; }
+              body {
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif;
+                margin: 16px;
+                color: #111827;
+                background: #f3f4f6;
+              }
+              .page {
+                max-width: 900px;
+                margin: 0 auto 24px;
+                background: #fff;
+                padding: 24px 28px;
+                border-radius: 12px;
+                box-shadow: 0 10px 30px rgba(0,0,0,.08);
+              }
+              h1 { font-size: 22px; margin: 0 0 8px; }
+              h2 {
+                font-size: 16px;
+                margin: 0 0 6px;
+                border-left: 4px solid #3b82f6;
+                padding-left: 8px;
+              }
+              .muted { color:#6b7280; font-size: 12px; }
+              .meta-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 8px;
+              }
+              .meta-table th,
+              .meta-table td {
+                padding: 4px 8px;
+                font-size: 13px;
+                border-bottom: 1px solid #e5e7eb;
+              }
+              .meta-table th {
+                width: 140px;
+                background: #f9fafb;
+                text-align: left;
+                color: #374151;
+              }
+              .meta-table td { text-align: left; }
+              .meta-table td.num { text-align: right; }
+              .data-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 8px;
+                font-size: 12px;
+              }
+              .data-table.small { font-size: 11px; }
+              .data-table th,
+              .data-table td {
+                border: 1px solid #e5e7eb;
+                padding: 3px 6px;
+              }
+              .data-table th {
+                background: #f3f4f6;
+                text-align: left;
+                white-space: nowrap;
+              }
+              .data-table td.num {
+                text-align: right;
+                white-space: nowrap;
+              }
+              .flex {
+                display: flex;
+                gap: 16px;
+                flex-wrap: wrap;
+              }
+              .flex > .card { flex: 1 1 260px; }
+              .bar-chart {
+                margin-top: 8px;
+              }
+
+              /* ▼ グラフ用 共通スタイル ▼ */
+              .chart-grid {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                margin-top: 12px;
+              }
+              .chart-card {
+                flex: 1 1 260px;
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                padding: 10px 12px;
+                background: #f9fafb;
+              }
+              .chart-card h2 {
+                margin-top: 0;
+                margin-bottom: 8px;
+                font-size: 15px;
+              }
+              .chart-caption {
+                margin-top: 4px;
+                font-size: 11px;
+                color: #6b7280;
+              }
+              .chart-legend {
+                margin-top: 6px;
+                font-size: 11px;
+                color: #6b7280;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+              }
+              .chart-legend-item {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+              }
+              .chart-legend-swatch {
+                width: 12px;
+                height: 12px;
+                border-radius: 999px;
+              }
+
+              /* 棒グラフ（媒体別ボリューム） */
+              .bar-chart {
+                margin-top: 4px;
+              }
+              .bar-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 6px;
+              }
+              .bar-label {
+                width: 140px;
+                font-size: 12px;
+                white-space: nowrap;
+                color: #4b5563;
+              }
+              .bar-wrap {
+                flex: 1;
+              }
+              .bar {
+                position: relative;
+                height: 16px;
+                margin-bottom: 4px;
+                background: #e5e7eb;
+                border-radius: 999px;
+                overflow: hidden;
+                font-size: 10px;
+              }
+              .bar span {
+                display: block;
+                height: 100%;
+                background: #3b82f6;  /* 部数 */
+              }
+              .bar.bar-yen span {
+                background: #10b981;   /* 料金 */
+              }
+              .bar em {
+                position: absolute;
+                top: 50%;
+                left: 8px;
+                transform: translateY(-50%);
+                font-style: normal;
+                color: #111827;
+              }
+
+              /* 円グラフ */
+              .pie-wrapper {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+              }
+              .pie-svg {
+                width: 180px;
+                height: 180px;
+              }
+
+              /* 散布図 */
+              .scatter-svg {
+                width: 100%;
+                max-width: 360px;
+                height: 240px;
+              }
+
+
+              .card {
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                padding: 10px 12px;
+                background: #f9fafb;
+                margin-top: 8px;
+              }
+              .note { margin-top: 4px; font-size: 11px; color: #6b7280; }
+              .print-hint {
+                text-align: right;
+                font-size: 11px;
+                color: #6b7280;
+                margin-top: 8px;
+              }
+              .print-btn {
+                display:inline-block;
+                margin-bottom:10px;
+                padding:6px 10px;
+                border-radius:999px;
+                border:1px solid #d1d5db;
+                background:#f9fafb;
+                font-size:12px;
+                cursor:pointer;
+              }
+              .map-card {
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                padding: 10px 12px;
+                background: #f9fafb;
+                margin-top: 12px;
+              }
+              .map-image {
+                width: 100%;
+                max-height: 400px;
+                object-fit: contain;
+                border-radius: 8px;
+                border: 1px solid #e5e7eb;
+                background: #fff;
+              }
+              @media print {
+                body { background:#fff; margin:0; }
+                .page {
+                  box-shadow:none;
+                  border-radius:0;
+                  margin:0;
+                  max-width:none;
+                }
+                .print-hint, .print-btn { display:none; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="page">
+              <button class="print-btn" onclick="window.print()">印刷 / PDF に保存</button>
+              <h1>${escHtml(titleText)}</h1>
+              <div class="muted">作成日：${y}年${m}月${d}日 ${hh}:${mm}</div>
+
+              <table class="meta-table" style="margin-top:12px;">
+                <tr><th>提案先</th><td>${escHtml(clientName || "（未入力）")}</td></tr>
+                <tr><th>配布期間</th><td>${escHtml(periodText || "（未入力）")}</td></tr>
+                <tr><th>ビュー種別</th><td>${escHtml(viewLabel)}</td></tr>
+                <tr><th>選択エリア数</th><td>${codes.length.toLocaleString()} 町丁目</td></tr>
+              </table>
+
+              <div class="flex" style="margin-top:12px;">
+                <div class="card">
+                  <h2>配布プラン概要</h2>
+                  <table class="meta-table">
+                    <tr><th>料金合計</th><td>${Math.round(totalYen).toLocaleString()}円</td></tr>
+                    <tr><th>部数合計</th><td>${Math.round(totalCps).toLocaleString()}部</td></tr>
+                    <tr><th>人口合計</th><td>${popTotal.toLocaleString()}人</td></tr>
+                    <tr><th>世帯数合計</th><td>${hhTotal.toLocaleString()}世帯</td></tr>
+                  </table>
+                </div>
+
+                <div class="card">
+                  <h2>ターゲット / 目標値</h2>
+                  <table class="meta-table">
+                    <tr><th>料金目標</th><td>${escHtml(budgetText || "（未設定）")}</td></tr>
+                    <tr><th>部数目標</th><td>${escHtml(copiesText || "（未設定）")}</td></tr>
+                    <tr><th>距離目標</th><td>${escHtml(distText || "（未設定）")}</td></tr>
+                    <tr><th>年齢ターゲット</th><td>${escHtml(tAge || "（未設定）")}</td></tr>
+                    <tr><th>男女別ターゲット</th><td>${escHtml(tAgeM || "-")} / ${escHtml(tAgeF || "-")}</td></tr>
+                    <tr><th>年収ターゲット</th><td>${escHtml(tIncome || "（未設定）")}</td></tr>
+                  </table>
+                </div>
+              </div>
+
+              ${mapBlockHtml}
+
+              <div class="flex" style="margin-top:12px;">
+                <div class="card">
+                  <h2>配布エリア属性</h2>
+                  <table class="meta-table">
+                    <tr><th>平均年齢</th><td>${fixed1(avgAge)}歳</td></tr>
+                    <tr><th>男性平均年齢</th><td>${fixed1(avgAgeMale)}歳</td></tr>
+                    <tr><th>女性平均年齢</th><td>${fixed1(avgAgeFemale)}歳</td></tr>
+                    <tr><th>平均年収</th><td>${fixed1(avgIncome)}万円</td></tr>
+                    <tr><th>乗用車保有台数（世帯加重平均）</th><td>${Number(carAvgWeighted.toFixed(3)).toLocaleString()}台</td></tr>
+                  </table>
+                </div>
+                ${gyotaiHtml}
+              </div>
+
+              ${chartsHtml}   <!-- ★ ここでグラフ3種類をまとめて挿入 -->
+
+              <h2 style="margin-top:18px;">媒体別配布計画</h2>
+              ${mediaTableHtml}
+
+              <h2 style="margin-top:18px;">配布エリア一覧</h2>
+              ${townTableHtml}
+
+              <div class="print-hint">
+                ※ ブラウザの「印刷」から PDF として保存し、そのままお客様への提案資料としてお使いいただけます。
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+
+        // ★ ここが重要：ポップアップには書かず、HTML 文字列を返す
+        return docHtml;
+      } catch (e) {
+        console.error("buildProposalReportHtml エラー", e);
+        alert("レポート生成中にエラーが発生しました。コンソールを確認してください。");
+        return null;
+      }
+    }
+
+
+    // ★ レポート出力（CSV）
+    function exportReportCsv() {
+      // 念のため最新状態に更新
+      updateAggregates();
+
+      const now = new Date();
+      const y  = now.getFullYear();
+      const m  = String(now.getMonth() + 1).padStart(2, "0");
+      const d  = String(now.getDate()).padStart(2, "0");
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const ss = String(now.getSeconds()).padStart(2, "0");
+      const filename = `report_${y}${m}${d}_${hh}${mm}${ss}.csv`;
+
+      const rows = [];
+
+      // 基本情報
+      const activeSet = getActiveSet();
+      const viewLabel =
+        viewMode === "media"
+          ? `媒体ビュー（${currentMediaName || "媒体未選択"}）`
+          : "基準ビュー";
+
+      rows.push(["レポート名", "商圏市場テスト"]);
+      rows.push(["ビュー", viewLabel]);
+      rows.push(["選択町数", String(activeSet.size)]);
+      rows.push(["出力日時", now.toLocaleString("ja-JP")]);
+      rows.push([]);
+
+      // サマリ（#topStats の内容をそのまま吸い出し）
+      const topStatRows = document.querySelectorAll("#topStats .row");
+      if (topStatRows.length) {
+        rows.push(["◎サマリ"]);
+        topStatRows.forEach(row => {
+          const cells = row.querySelectorAll("span");
+          if (cells.length >= 2) {
+            const label = cells[0].textContent.trim();
+            const value = cells[1].textContent.trim();
+            rows.push(["サマリ", label, value]);
+          }
+        });
+        rows.push([]);
+      }
+
+      // 業態指標（選択されているときだけ）
+      const typeSelectEl = document.getElementById("typeSelect");
+      if (typeSelectEl && typeSelectEl.value) {
+        rows.push(["◎業態指標", typeSelectEl.value]);
+
+        const metricRows = document.querySelectorAll(
+          "#typeList .type-metrics-row"
+        );
+        metricRows.forEach(row => {
+          const labelEl = row.querySelector(".type-metrics-label");
+          const valueEl = row.querySelector(".type-metrics-value");
+          if (!labelEl || !valueEl) return;
+          const label = labelEl.textContent.trim();
+          const value = valueEl.textContent.trim();
+          rows.push(["業態指標", label, value]);
+        });
+
+        rows.push([]);
+      }
+
+      // 媒体集計（#mediaStats 内の table をそのまま CSV 化）
+      const mediaTable = document.querySelector("#mediaStats table");
+      if (mediaTable) {
+        const headCells = mediaTable.querySelectorAll("thead tr th");
+        const header = Array.from(headCells).map(th =>
+          th.textContent.trim()
+        );
+
+        rows.push(["◎媒体集計"]);
+        if (header.length) {
+          rows.push(header);
+        }
+
+        // tbody
+        mediaTable.querySelectorAll("tbody tr").forEach(tr => {
+          const tds = tr.querySelectorAll("td");
+          const line = Array.from(tds).map(td =>
+            td.textContent.trim()
+          );
+          if (line.length) rows.push(line);
+        });
+
+        // tfoot（合計行）
+        mediaTable.querySelectorAll("tfoot tr").forEach(tr => {
+          const tds = tr.querySelectorAll("th,td");
+          const line = Array.from(tds).map(td =>
+            td.textContent.trim()
+          );
+          if (line.length) rows.push(line);
+        });
+
+        rows.push([]);
+      }
+
+      // 選択町一覧（#picked .row）
+      const pickedRows = document.querySelectorAll("#picked .row");
+      if (pickedRows.length) {
+        rows.push(["◎選択町一覧"]);
+        rows.push(["市区町村・町丁目名", "町丁目コード"]);
+
+        pickedRows.forEach(row => {
+          const spans = row.querySelectorAll("span");
+          if (spans.length >= 2) {
+            const name = spans[0].textContent.trim();
+            const code = spans[1].textContent.trim();
+            rows.push([name, code]);
+          }
+        });
+
+        rows.push([]);
+      }
+
+      // 必要なら：生の選択コード一覧も末尾に追加
+      // rows.push(["◎選択町コード一覧"]);
+      // getActiveSet().forEach(code => {
+      //   rows.push([String(code)]);
+      // });
+
+      // Papa.unparse で CSV 文字列に変換（PapaParse を既に読み込んでいる前提）
+      const csv = Papa.unparse(rows);
+
+      const blob = new Blob([csv], {
+        type: "text/csv;charset=utf-8;"
+      });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
 
     ["distInput"].forEach(id => {
       const el = $(id);
       el?.addEventListener("change", renderTargetRadius);
-    });
-
-    // 表示切替ボタン
-    $("viewBaseBtn").addEventListener("click", () => {
-      viewMode = "base";
-      applyViewSelection();
-      updateAggregates();
-      updateViewStatus(); 
     });
 
 
@@ -2302,22 +5541,9 @@
         if (!mediaName) return;
 
         const nowEnabled = isMediaEnabled(mediaName);
-        const newEnabled = !nowEnabled;
+        setMediaEnabled(mediaName, !nowEnabled);   // ← まとめて面倒みる
 
-        mediaEnabledByName.set(mediaName, newEnabled);
-
-        const row = toggleBtn.closest("tr[data-media-name]");
-        if (row) {
-          row.classList.toggle("media-row-disabled", !newEnabled);
-        }
-        toggleBtn.classList.toggle("off", !newEnabled);
-        toggleBtn.textContent = newEnabled ? "対象" : "除外中";
-
-        // ON/OFF 切り替えは集計や業態指標にも反映させる
-        updateAggregates();
-        renderTypeMetrics();
-
-        return; // ここで終了（行クリック処理には行かない）
+        return; // 行クリック処理には行かない
       }
 
       // 2) それ以外のクリックは、従来通り「媒体ビューに切り替え」
@@ -2353,6 +5579,64 @@
       updateViewStatus();
     });
 
+    document.getElementById("attrMetrics")?.addEventListener("change", (ev) => {
+      const el = ev.target;
+
+      // ---- ビュー切り替え（基準の町行＋媒体行）----
+      if (el.classList.contains("attr-view-check")) {
+        const scopeKind = el.dataset.scopeKind || "";
+        const mediaName = el.dataset.mediaName || "";
+
+        // まず全ビュー用チェックを一旦リセットして、この行だけ ON
+        document
+          .querySelectorAll("#attrMetrics .attr-view-check")
+          .forEach(cb => { cb.checked = (cb === el); });
+
+        if (scopeKind === "base") {
+          // 基準ビューに戻す
+          viewMode = "base";
+          applyViewSelection();
+          updateAggregates();
+          updateViewStatus();
+          return;
+        }
+
+        if (scopeKind === "media" && mediaName) {
+          currentMediaName = mediaName;
+
+          let set = mediaViewByName.get(mediaName);
+          if (!set) {
+            const allCodes = mediaCodesAllByName?.get(mediaName) || new Set();
+            if (selected.size > 0) {
+              set = new Set(
+                [...allCodes].map(String).filter(c => selected.has(c))
+              );
+            } else {
+              set = new Set(allCodes);
+            }
+            mediaViewByName.set(mediaName, set);
+          }
+
+          mediaViewSet = new Set(set);
+          viewMode = "media";
+
+          applyViewSelection();
+          updateAggregates();
+          updateViewStatus();
+          return;
+        }
+
+        return;
+      }
+
+      // ---- 対象外媒体 ON/OFF ----
+      if (el.classList.contains("attr-target-check")) {
+        const mediaName = el.dataset.mediaName;
+        if (!mediaName) return;
+        setMediaEnabled(mediaName, el.checked);
+        return;
+      }
+    });
 
 
 
