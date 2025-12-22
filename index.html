@@ -120,6 +120,27 @@
       font-size: 13px;
       background: #fafafa;
     }
+
+
+    #originName {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 6px 8px;
+      width: 100%;
+      font-size: 13px;
+      background: #fafafa;
+    }
+
+    /* ★追加：路線セレクト */
+    #lineSelect {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 6px 8px;
+      width: 100%;
+      font-size: 13px;
+      background: #fafafa;
+    }
+
     #typeList {
       font-size: 12px;
       margin-top: 4px;
@@ -639,6 +660,18 @@
                style="border:1px solid #ddd;border-radius:8px;padding:6px 10px;">
       </div>
 
+      <!-- ★追加：鉄道路線（選択すると、その路線の駅がある町も候補に追加） -->
+      <div class="type-box" style="margin-top:8px;">
+        <label for="lineSelect">鉄道路線（候補に追加）</label>
+        <select id="lineSelect" disabled>
+          <option value="">駅マスタ読込中...</option>
+        </select>
+        <div id="lineSelectHint" class="muted" style="font-size:11px;">
+          路線を選ぶと、その路線の駅がある町も「隣接候補」と同じ扱いで自動選択の候補になります（未選択なら従来通り）。
+        </div>
+      </div>
+
+
       <!-- 属性選択ブロック：町マスタの「属性」を含む列を自動検出してチェックボックス化 -->
       <details open style="margin-top:6px;">
         <summary>重視する属性を選択</summary>
@@ -710,6 +743,7 @@
     const STORE_KEY     = "店cd";
     const CSV_TYPE   = "./type_master.csv";
     const sleep = (ms=0) => new Promise(resolve => setTimeout(resolve, ms));
+    const CSV_STATION = "./station_master.csv";
 
     // ==== 四隅(bbox)カラム定義（CSV優先） ====
     const BBOX_KEYS = {
@@ -772,6 +806,28 @@
       const ym = (lat2 - lat1) * 111320;
       return Math.hypot(xm, ym);
     }
+
+    // ★追加：この町が「路線のどれか駅」にどれだけ近いか（最短距離）
+    function getRailMinDistForTown(code){
+      const k = String(code);
+      if (!activeLineStationCentroids || activeLineStationCentroids.length === 0) return null;
+
+      if (railMinCache.has(k)) return railMinCache.get(k);
+
+      const p = PRE.get(k);
+      const cent = p?.centroid || centroidOf(k);
+      if (!cent) { railMinCache.set(k, null); return null; }
+
+      let best = Infinity;
+      for (const s of activeLineStationCentroids){
+        const d = distMeters(cent, s);
+        if (d < best) best = d;
+      }
+
+      railMinCache.set(k, best);
+      return best;
+    }
+
 
     const toNumber = (v) => {
       if (v == null) return 0;
@@ -1084,6 +1140,135 @@
     let typeMasterByGyotai = new Map();
     let readyTown=false, readyMedia=false, readyGeo=false;
 
+    // ★ 駅マスタ用（station_master.csv）
+    let stationRows = [];
+    let stationByTown = new Map();   // town_code -> [{line_name, station_name}, ...]
+    let stationByName = new Map();   // station_name -> [{line_name, town_code}, ...]
+    let readyStation = false;
+
+
+    // ★追加：路線 -> 町コード集合
+    let stationByLine = new Map();   // line_name -> Set(town_code)
+
+    // ★追加：鉄道路線選択（候補追加）
+    let activeLineName = "";
+    let activeLineTownSet = new Set();
+
+    let activeLineStationCentroids = [];   // Array<[lng,lat]>
+    let railMinCache = new Map();          // town_code -> minDistanceToAnyStation (meters)
+
+
+    function setActiveLine(lineName){
+      activeLineName = String(lineName || "").trim();
+
+      // 1) 「駅がある町」の集合（候補に追加する町）
+      activeLineTownSet = new Set();
+      if (activeLineName && stationByLine.has(activeLineName)) {
+        for (const c of stationByLine.get(activeLineName)) activeLineTownSet.add(String(c));
+      }
+
+      // 2) ★追加：「路線の全駅（の町重心）」を作る
+      activeLineStationCentroids = [];
+      railMinCache = new Map();
+
+      if (activeLineName && stationRows && stationRows.length) {
+        const seen = new Set(); // station_name で重複排除（無い場合は town_code）
+        for (const r of stationRows) {
+          const ln = String(r["line_name"] ?? r["\ufeffline_name"] ?? r["路線名"] ?? "").trim();
+          if (ln !== activeLineName) continue;
+
+          const st = String(r["station_name"] ?? r["駅名"] ?? "").trim();
+          const tc = String(r["town_code"] ?? r["町丁目コード"] ?? "").trim();
+          if (!tc) continue;
+
+          const key = st || tc;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          const cent = PRE.get(tc)?.centroid || centroidOf(tc);
+          if (cent) activeLineStationCentroids.push(cent);
+        }
+      }
+
+      // 3) 候補集合が変わるのでキャッシュをクリア
+      neighborCache?.clear?.();
+      neighborPtr?.clear?.();
+      exhaustedCornerBase?.clear?.();
+
+      // 4) ヒント更新
+      const hint = $("lineSelectHint");
+      if (hint) {
+        hint.innerHTML = activeLineName
+          ? `選択中：<b>${escHtml(activeLineName)}</b>（駅のある町: ${activeLineTownSet.size}件 / 駅数: ${activeLineStationCentroids.length}）<br>※候補の並びは「全駅から近い町」優先（最遠駅距離→平均距離→起点距離）`
+          : `路線を選ぶと、その路線の駅がある町も「隣接候補」と同じ扱いで自動選択の候補になります（未選択なら従来通り）。`;
+      }
+      applyLineTownHighlight();         // ★路線の駅町を onLine=true にして強調
+      map?.triggerRepaint?.();          // （任意）塗り更新を確実に
+    }
+
+
+    function getActiveLineTownCandidates(){
+      return (activeLineName && activeLineTownSet && activeLineTownSet.size) ? activeLineTownSet : null;
+    }
+
+    // ★追加：候補町が「路線のどれか駅」にどれだけ近いか（最短距離）
+    function getRailMinDistForTown(code){
+      const k = String(code);
+      if (!activeLineStationCentroids || activeLineStationCentroids.length === 0) return null;
+
+      if (railMinCache.has(k)) return railMinCache.get(k);
+
+      const centroid = PRE.get(k)?.centroid || centroidOf(k);
+      if (!centroid) { railMinCache.set(k, null); return null; }
+
+      let best = Infinity;
+      for (const s of activeLineStationCentroids){
+        const d = distMeters(centroid, s); // meters
+        if (d < best) best = d;
+      }
+      railMinCache.set(k, best);
+      return best;
+    }
+
+
+    function populateLineSelect(){
+      const sel = $("lineSelect");
+      if (!sel) return;
+
+      const lines = [...stationByLine.keys()]
+        .map(s => String(s || "").trim())
+        .filter(Boolean)
+        .sort((a,b)=>a.localeCompare(b,"ja"));
+
+      if (!lines.length) {
+        sel.innerHTML = `<option value="">（路線データなし）</option>`;
+        sel.disabled = true;
+        return;
+      }
+
+      const opts = [`<option value="">（未選択：隣接のみ）</option>`]
+        .concat(lines.map(name => {
+          const n = stationByLine.get(name)?.size || 0;
+          return `<option value="${escHtml(name)}">${escHtml(name)}（町${n}件）</option>`;
+        }));
+
+      sel.innerHTML = opts.join("");
+      sel.disabled = false;
+
+      // 既に選択済みなら復元
+      sel.value = activeLineName || "";
+
+      // change handler（重複登録防止）
+      if (!sel._boundLineChange) {
+        sel.addEventListener("change", () => setActiveLine(sel.value));
+        sel._boundLineChange = true;
+      }
+
+      // 初期ヒント
+      setActiveLine(sel.value);
+    }
+
+
     // ★ 基準町で選んだ町を起点に、
     //    媒体ごとの「同じ店cdが出ている町」を自動的に媒体選択セットに足す
     function autoExpandMediaFromBaseTown(baseCode) {
@@ -1130,6 +1315,9 @@
     // 基準の町（自動選択や手動クリックで使うメインのセット）
     const selected = new Set();
 
+    // ★追加：前回 onLine を付けた町（解除用）
+    let prevOnLineTowns = new Set();
+
     // 媒体ビュー用の「今表示しているセット」
     let mediaViewSet = new Set();
 
@@ -1157,6 +1345,32 @@
       return viewMode === "media" ? mediaViewSet : selected;
     }
 
+    // ★追加：路線選択に合わせて「駅がある町」を強調（onLine=true）
+    function applyLineTownHighlight(){
+      // map/source がまだなら何もしない
+      if (!map || !map.getSource("aichi")) return;
+
+      // あなたが作っている「路線で候補になる町Set」を取得（名前はあなたの実装に合わせて）
+      // 例：activeLineTownSet が Set ならそれを使う
+      const next = (typeof activeLineTownSet !== "undefined" && activeLineTownSet && activeLineTownSet.size)
+        ? activeLineTownSet
+        : null;
+
+      // 1) 前回分を解除
+      for (const code of prevOnLineTowns){
+        map.setFeatureState({ source:"aichi", id:String(code) }, { onLine:false });
+      }
+      prevOnLineTowns = new Set();
+
+      // 2) 今回分を付与
+      if (next) {
+        for (const code of next){
+          const k = String(code);
+          prevOnLineTowns.add(k);
+          map.setFeatureState({ source:"aichi", id:k }, { onLine:true });
+        }
+      }
+    }
 
 
     function applyViewSelection() {
@@ -1466,6 +1680,68 @@
       hideOverlay();   // UIデバッグ時はすぐ閉じる
     }
 
+    // ★ 駅マスタ読み込み（添付: station_master.csv）
+    //   - ヘッダー: line_name, station_name, town_code
+    //   - BOM が付いている場合、最初の列が "\ufeffline_name" になるので両対応
+    Papa.parse(CSV_STATION, {
+      header: true,
+      download: true,
+      dynamicTyping: false,   // town_code を文字列で保持したいので false
+      skipEmptyLines: true,
+      encoding: "utf-8",
+      complete: (res) => {
+        const data = Array.isArray(res.data) ? res.data : [];
+        const rows = data.filter(r =>
+          r && r["town_code"] != null && String(r["town_code"]).trim() !== ""
+        );
+
+        stationRows = rows;
+        stationByTown = new Map();
+        stationByName = new Map();
+        stationByLine = new Map();
+
+        for (const r of rows) {
+          const townCode = String(r["town_code"]).trim();
+          const lineName = String(r["line_name"] ?? r["\ufeffline_name"] ?? "").trim();
+          const stName   = String(r["station_name"] ?? "").trim();
+
+          if (!stationByTown.has(townCode)) stationByTown.set(townCode, []);
+          stationByTown.get(townCode).push({ line_name: lineName, station_name: stName });
+
+          if (stName) {
+            if (!stationByName.has(stName)) stationByName.set(stName, []);
+            stationByName.get(stName).push({ line_name: lineName, town_code: townCode });
+          }
+
+          if (lineName) {
+            if (!stationByLine.has(lineName)) stationByLine.set(lineName, new Set());
+            stationByLine.get(lineName).add(townCode);
+          }
+        }
+
+        // 町ごとに重複（同一路線・同一駅）を除去
+        for (const [code, arr] of stationByTown.entries()) {
+          const seen = new Set();
+          stationByTown.set(code, arr.filter(o => {
+            const key = `${o.line_name}|${o.station_name}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }));
+        }
+
+        // 進捗表示（任意）
+        const s = $("summary");
+        if (s) s.innerHTML = (s.innerHTML ? (s.innerHTML + " / ") : "") + `<span>CSV(駅)読込完了（${rows.length} 行）</span>`;
+        populateLineSelect();
+        readyStation = true;
+      },
+      error: (err) => {
+        console.error("CSV_STATION 読み込みエラー", err);
+      }
+    });
+
+
 
     Papa.parse(CSV_TOWN, {
       header: true, download: true, dynamicTyping: true, encoding: "utf-8",
@@ -1731,6 +2007,9 @@
             // hover
             ["boolean",["feature-state","hover"],false],    "#60a5fa",
 
+            // ★ 路線選択で強調（駅の町）
+            ["boolean",["feature-state","onLine"],false], "#fde047",
+
             // それ以外は透明
             "#00000000"
           ],
@@ -1739,6 +2018,8 @@
               ["boolean",["feature-state","base"],false], 0.35,
               ["boolean",["feature-state","selected"],false], 0.55,
               ["boolean",["feature-state","hover"],false],    0.35,
+              // ★追加：路線強調の表示
+              ["boolean",["feature-state","onLine"],false],   0.22,
               0.0
           ]
         }});
@@ -1747,10 +2028,16 @@
         paint:{ "line-color":[ "case",
                   ["boolean",["feature-state","base"],false], "#b45309",
                   ["boolean",["feature-state","selected"],false], "#1e40af",
+
+                  // ★追加：路線強調の枠
+                  ["boolean",["feature-state","onLine"],false], "#eab308",
+                  
                   "#1e3a8a" ],
                 "line-width":[ "case",
                   ["boolean",["feature-state","base"],false], 2.6,
                   ["boolean",["feature-state","selected"],false], 1.8,
+                  // ★追加：路線強調の枠（少し太く）
+                  ["boolean",["feature-state","onLine"],false], 2.2,
                   0.6 ] }});
       
             // ★ 中心点と距離圏の円を最前面に出す
@@ -2203,6 +2490,16 @@
 
     function isCornerExhausted(code){
       if (!USE_CORNER_ADJACENCY) return false;
+      // ★追加：鉄道路線候補があり、未選択が残っているなら「枯渇」扱いにしない
+      const rail = getActiveLineTownCandidates();
+      if (rail && rail.size){
+        for (const c of rail){
+          if (!selected.has(String(c))){
+            return false;
+          }
+        }
+      }
+
       const k = String(code);
 
       // すでに判定済みならそのまま返す
@@ -2245,8 +2542,10 @@
     }
 
     function getNeighborList(code){
+      const rail = getActiveLineTownCandidates(); // ← ここで定義
+      const railOn = (rail && rail.size && activeLineStationCentroids.length);
+
       if (isCornerExhausted(code)) {
-        // 本当に「四隅候補は存在していて、それが全部選ばれている」場合だけここに来る
         neighborCache.set(code, []);
         neighborPtr.set(code, 0);
         return [];
@@ -2254,13 +2553,8 @@
 
       let candidates = null;
       if (USE_CORNER_ADJACENCY) {
-        const arr = getCornerAdjacentList(code);
-
-        // ★候補が 1 件以上あるときだけ「四隅候補」モードを使う
-        // 0 件のときは candidates=null のまま → 全町からフォールバック
-        if (arr.length > 0) {
-          candidates = new Set(arr);
-        }
+        const a = getCornerAdjacentList(code);
+        if (a.length > 0) candidates = new Set(a);
       }
 
       if (neighborCache.has(code)) return neighborCache.get(code);
@@ -2268,22 +2562,48 @@
       const c0 = centroidOf(code);
       if (!c0) return [];
 
-      const arr = [];
-      const pool = candidates
-        ? [...candidates]                      // 四隅候補がある場合 → それだけを対象
-        : allFeatures.map(f => String(f.code)); // 四隅候補が無い場合 → 全町から距離ソート
-
-      for (const c of pool){
-        if (String(c) === String(code)) continue;
-        const p = PRE.get(String(c));
-        const d = distMeters(c0, (p?.centroid || centroidOf(c)));
-        arr.push({code:String(c), d});
+      // 候補プール作成（四隅候補があるならそれ + 路線駅町）
+      let pool;
+      if (candidates) {
+        const poolSet = new Set(candidates);
+        if (railOn) {
+          for (const c of rail) poolSet.add(String(c));
+        }
+        pool = [...poolSet];
+      } else {
+        pool = allFeatures.map(f => String(f.code));
       }
-      arr.sort((a,b)=>a.d-b.d);
+
+      const arr = [];
+      for (const c of pool){
+        const cc = String(c);
+        if (cc === String(code)) continue;
+
+        const centroid = PRE.get(cc)?.centroid || centroidOf(cc);
+        const d = distMeters(c0, centroid);
+
+        const m = railOn ? getRailMinDistForTown(cc) : null;
+        const railMin = (m == null) ? Infinity : m;
+
+        arr.push({ code: cc, d, railMin });
+      }
+
+      // ★路線ON：最寄り駅が近い町を優先
+      if (railOn) {
+        arr.sort((a,b)=>
+          (a.railMin - b.railMin) || // 最寄り駅までの距離
+          (a.d - b.d)                // タイブレーク：起点町距離
+        );
+      } else {
+        arr.sort((a,b)=>a.d-b.d);
+      }
+
       neighborCache.set(code, arr);
       neighborPtr.set(code, 0);
       return arr;
     }
+
+
 
     function nearestUnpickedFast(fromCode, excludeSet){
       if (isCornerExhausted(fromCode)) return null;
@@ -2460,122 +2780,6 @@
       };
     }
 
-
-    function computeCategoryMetrics(category, center) {
-      if (!mediaIndex || !townIndex) return { viewRate: null, visitRaw: null };
-
-      const baseStr = baseCode ? String(baseCode) : null;
-
-      // --- ① 全媒体の「選択町」を union ---
-      const allMediaSelected = new Set();
-      for (const set of mediaViewByName.values()) {
-        for (const c of set) {
-          allMediaSelected.add(String(c));
-        }
-      }
-
-      // --- ② 基準の選択町との交差（※基準の町は除外）---
-      let targetCodes = [];
-      if (allMediaSelected.size) {
-        for (const c of allMediaSelected) {
-          const s = String(c);
-          if (baseStr && s === baseStr) continue;
-          if (!selected.has(s)) continue;
-          targetCodes.push(s);
-        }
-      }
-
-      // --- ③ 交差が空なら従来どおり selected ベース ---
-      if (!targetCodes.length) {
-        targetCodes = Array.from(selected).filter(code => {
-          const s = String(code);
-          return !baseStr || s !== baseStr;
-        });
-      }
-
-      if (!targetCodes.length) {
-        return { viewRate: null, visitRaw: null };
-      }
-
-      const centerLngLat =
-        center ||
-        lastClickLngLat ||
-        centroidOf(baseCode || "") ||
-        getMapCenterLngLat();
-
-      let hhSum   = 0;   // 選択町の世帯合計
-      let seenSum = 0;   // 見たとみなす世帯合計
-      let visitRaw = 0;  // 距離減衰込みの来店期待値の元
-
-    for (const code of targetCodes) {
-      const codeStr = String(code);
-        const rowsForTown = mediaIndex.get(codeStr);
-        if (!rowsForTown) continue;
-
-        // この町で、その分類かつ「対象媒体」の部数を合計
-        let copiesInTown = 0;
-        for (const r of rowsForTown) {
-          if ((r["分類"] ?? "") !== category) continue;
-
-          const mediaName = r["媒体名"] ?? "(名称不明)";
-          if (!isMediaEnabled(mediaName)) continue;  // ★ OFF 媒体は無視
-
-          copiesInTown += toNumber(r["部数"]);
-        }
-        if (!copiesInTown) continue;
-
-        const townRow = townIndex.get(codeStr);
-        const hh = toNumber(townRow?.[HH_TOTAL_KEY] ?? 0);
-        if (!hh) continue;
-
-        // 1世帯あたり 1部 までは視認すると仮定（それ以上は 100%で頭打ち）
-        const coverageTown = Math.min(1, copiesInTown / hh);
-
-        hhSum   += hh;
-        seenSum += hh * coverageTown;
-
-        const p = PRE.get(codeStr);
-        const centroid = p?.centroid || centroidOf(codeStr);
-        if (centroid) {
-          const dKm = distMeters(centerLngLat, centroid) / 1000;
-          const decay = 1 / (1 + dKm);
-          visitRaw += hh * coverageTown * decay;
-        }
-      }
-
-      let viewRate = null;
-      if (hhSum > 0) {
-        viewRate = seenSum / hhSum; // 0〜1
-      }
-
-      return {
-        viewRate,
-        visitRaw: visitRaw || null
-      };
-    }
-
-
-    // 目標抽出
-    function getTargets(){
-      const toNum = (id) => { const v = toNumber(document.getElementById(id)?.value); return (v && isFinite(v)) ? v : null; };
-      return { age: toNum("targetAge"), male: toNum("targetAgeMale"), female: toNum("targetAgeFemale"), income: toNum("targetIncome") };
-    }
-    function anyTargetEntered(t){ return [t.age, t.male, t.female, t.income].some(v => v!=null); }
-    function lossFromAgg(agg, targets){
-      const avgAge       = agg.ageN    ? agg.ageW/agg.ageN       : 0;
-      const avgAgeMale   = agg.maleN   ? agg.maleW/agg.maleN     : 0;
-      const avgAgeFemale = agg.femaleN ? agg.femaleW/agg.femaleN : 0;
-      const avgIncome    = agg.incN    ? agg.incW/agg.incN       : 0;
-      const S = { age:5, male:5, female:5, income:50 };
-      const W = { age:1.0, male:0.7, female:0.7, income:1.2 };
-      let loss=0, used=0;
-      if (targets.age!=null){    loss += W.age    * ((avgAge       - targets.age   )/S.age   )**2; used++; }
-      if (targets.male!=null){   loss += W.male   * ((avgAgeMale   - targets.male  )/S.male  )**2; used++; }
-      if (targets.female!=null){ loss += W.female * ((avgAgeFemale - targets.female)/S.female)**2; used++; }
-      if (targets.income!=null){ loss += W.income * ((avgIncome    - targets.income)/S.income)**2; used++; }
-      return used? loss/used : Infinity;
-    }
-
     // 距離優先（基準セット selected を対象）
     async function runDistanceFirst(){
       const targetYen    = Math.round(toNumber($("budgetInput").value) * 10000);
@@ -2616,7 +2820,31 @@
           centroidOf(baseCode||"") ??
           lastClickLngLat ??
           getMapCenterLngLat();
-        const rankedAll = getDistanceSortedList(origin);
+
+          const rail = getActiveLineTownCandidates();
+
+          let rankedAll;
+          if (rail && rail.size && activeLineStationCentroids.length) {
+            rankedAll = allFeatures.map(f => {
+              const t = getEnabledMediaTotalsForTown(f.code);
+              const d = distMeters(origin, f.centroid);
+
+              const m = getRailMinDistForTown(f.code);
+              const railMin = (m == null) ? Infinity : m;
+
+              return { code: f.code, d, cost: t.yen, cps: t.cps, railMin };
+            });
+
+            // ★路線選択中：駅に近い町（最寄り駅距離）が優先
+            rankedAll.sort((a,b)=>
+              (a.railMin - b.railMin) ||
+              (a.d - b.d)
+            );
+          } else {
+            rankedAll = getDistanceSortedList(origin);
+          }
+
+
         let ranked = rankedAll.filter(r => !selected.has(String(r.code)));
         let hadDistFilter = false, hasOutside = false;
         if (targetDist > 0) {
@@ -2702,238 +2930,6 @@
       const room = SEED_LIMIT - (baseStr ? 1 : 0);
       const arr = pool.slice(0, Math.max(0, room)).map(x=>x.code);
       return (baseStr && pass(baseStr)) ? [baseStr, ...arr] : arr;
-    }
-
-    async function runGrowToTargets(){
-      resetFrontierCaches();
-
-      const msg = $("selectMsg");
-      const targets = getTargets();
-      const targetYen    = Math.round(toNumber($("budgetInput").value) * 10000);
-      const targetCopies = Math.round(toNumber($("copiesInput").value) * 10000);
-      const targetDist   = Math.round(toNumber($("distInput").value) * 1000);
-
-      if (!townIndex || !allFeatures.length || !PRE.size){ msg.textContent = "初期計算の完了を待っています。"; return; }
-      if (![targets.age, targets.male, targets.female, targets.income].some(v => v!=null)){
-        msg.textContent = "少なくとも1つの目標（年齢・男女年齢・年収）を入力してください。"; return;
-      }
-
-      viewMode = "base";
-      applyViewSelection();
-
-      ensureBaseIfMissing();
-      updateBaseFeatureState();
-      renderTargetRadius();
-
-      // ★ 基準町＝中心点の町を最初に1件選ぶ
-      ensureBaseTownSelectedForAuto(targetDist);
-      updateAggregates();
-
-      beginAuto();
-      try {
-
-        $("budgetInput")?.classList.remove("hit"); $("copiesInput")?.classList.remove("hit"); $("distInput")?.classList.remove("hit");
-
-        let agg = { ageW:0, ageN:0, maleW:0, maleN:0, femaleW:0, femaleN:0, incW:0, incN:0 };
-        let totalYen = 0, totalCps = 0;
-        for (const c of selected){
-          const p = PRE.get(String(c)); if (!p) continue;
-          agg.ageW += p.ageW; agg.ageN += p.ageN;
-          agg.maleW += p.maleW; agg.maleN += p.maleN;
-          agg.femaleW += p.femaleW; agg.femaleN += p.femaleN;
-          agg.incW += p.incW; agg.incN += p.incN;
-
-          const t = getEnabledMediaTotalsForTown(c); // ★ ここでON媒体だけ
-          totalYen += t.yen;
-          totalCps += t.cps;
-        }
-
-
-        const centerForRadius =
-          centroidOf(baseCode || "") ??
-          lastClickLngLat ??
-          getMapCenterLngLat();
-        let allowedInRadius = null;
-        if (targetDist > 0 && centerForRadius){
-          allowedInRadius = new Set();
-          for (const f of allFeatures){
-            const p = PRE.get(String(f.code)); if (!p) continue;
-            if (distMeters(centerForRadius, p.centroid) <= targetDist) allowedInRadius.add(String(f.code));
-          }
-        }
-        const inRadiusFast = (code) => !allowedInRadius || allowedInRadius.has(String(code));
-
-        if (selected.size === 0) {
-          const baseStr = baseCode ? String(baseCode) : null;
-          const baseOK  = baseStr && inRadiusFast(baseStr);
-
-          const pickNearestInRadiusTo = (lngLat) => {
-            let best = null;
-            for (const f of allFeatures) {
-              const code = String(f.code);
-              if (selected.has(code)) continue;
-              if (!inRadiusFast(code)) continue;
-              const p = PRE.get(code); if (!p) continue;
-              const d = distMeters(lngLat, p.centroid);
-              if (!best || d < best.d) best = { code, d };
-            }
-            return best?.code || null;
-          };
-
-          let firstCode = null;
-          if (baseOK) {
-            firstCode = baseStr;
-          } else {
-            const anchor = lastClickLngLat ?? (baseStr ? (PRE.get(baseStr)?.centroid) : null) ?? getMapCenterLngLat();
-            firstCode = pickNearestInRadiusTo(anchor);
-          }
-
-          if (!firstCode) {
-            let best = null;
-            for (const f of allFeatures) {
-              const code = String(f.code);
-              if (!inRadiusFast(code)) continue;
-              const p = PRE.get(code); if (!p) continue;
-              const nextAgg = {
-                ageW: agg.ageW + p.ageW, ageN: agg.ageN + p.ageN,
-                maleW: agg.maleW + p.maleW, maleN: agg.maleN + p.maleN,
-                femaleW: agg.femaleW + p.femaleW, femaleN: agg.femaleN + p.femaleN,
-                incW: agg.incW + p.incW, incN: agg.incN + p.incN
-              };
-              const L = lossFromAgg(nextAgg, targets);
-              const anchor = lastClickLngLat ?? centroidOf(baseCode||"") ?? getMapCenterLngLat();
-              const d = distMeters(anchor, p.centroid);
-              if (!best || L < best.L || (L === best.L && d < best.d)) best = { code, L, d, nextAgg };
-            }
-            if (best) firstCode = best.code;
-          }
-
-          if (!firstCode) { msg.textContent = "半径内に候補が見つかりませんでした。"; finishAuto(); return; }
-
-          selected.add(firstCode);
-          const p0 = PRE.get(firstCode);
-          agg = {
-            ageW: agg.ageW + p0.ageW, ageN: agg.ageN + p0.ageN,
-            maleW: agg.maleW + p0.maleW, maleN: agg.maleN + p0.maleN,
-            femaleW: agg.femaleW + p0.femaleW, femaleN: agg.femaleN + p0.femaleN,
-            incW: agg.incW + p0.incW, incN: agg.incN + p0.incN
-          };
-
-          // ★ 料金・部数は「対象ONの媒体だけ」にする
-          const t0 = getEnabledMediaTotalsForTown(firstCode);
-          totalYen += t0.yen;
-          totalCps += t0.cps;
-          map.setFeatureState({source:"aichi", id:firstCode}, {selected:true});
-          if (!seedLRU.has(firstCode)) seedLRU.set(firstCode, -1);
-
-          // ★ ここでも媒体セットへ反映
-          autoExpandMediaFromBaseTown(String(firstCode));
-
-          if (!baseStr) { baseCode = String(firstCode); updateBaseFeatureState(); renderTargetRadius(); }
-
-          updateAggregates(); 
-          await sleep(0);
-        }
-
-        let order = getInitialSeeds(allowedInRadius);
-
-        let stoppedBy = null;
-        let step = 0;
-
-        while (true){
-          if (STOP.requested){ stoppedBy = 'stop'; break; }
-          if (targetYen>0 && totalYen >= targetYen){ stoppedBy='yen'; break; }
-          if (targetCopies>0 && totalCps >= targetCopies){ stoppedBy='copies'; break; }
-
-          const frontier = new Map();
-          for (const base of order){
-            if (isCornerExhausted(base)) continue;
-            const n = nearestUnpickedFast(base, selected);
-            if (n) frontier.set(n.code, n);
-          }
-          if (frontier.size === 0) { stoppedBy = 'no-candidate'; break; }
-
-          const list = [...frontier.values()];
-          const cand = allowedInRadius ? list.filter(x => allowedInRadius.has(String(x.code))) : list;
-          if (allowedInRadius && cand.length === 0){ stoppedBy = 'dist'; break; }
-
-          let best=null;
-          const candidates = cand.length ? cand : list;
-          for (const c of candidates){
-            const code = String(c.code);
-            if (selected.has(code)) continue;
-            const p = PRE.get(code); if (!p) continue;
-            const t = getEnabledMediaTotalsForTown(code);
-
-            const nextY = totalYen + t.yen;
-            const nextC = totalCps + t.cps;
-            if ((targetYen>0 && nextY>targetYen) || (targetCopies>0 && nextC>targetCopies)) continue;
-
-            const nextAgg = {
-              ageW: agg.ageW + p.ageW, ageN: agg.ageN + p.ageN,
-              maleW: agg.maleW + p.maleW, maleN: agg.maleN + p.maleN,
-              femaleW: agg.femaleW + p.femaleW, femaleN: agg.femaleN + p.femaleN,
-              incW: agg.incW + p.incW, incN: agg.incN + p.incN
-            };
-            const L = lossFromAgg(nextAgg, targets);
-            if (!best || L < best.L || (L===best.L && c.d < best.d)) best = { code, L, d:c.d, nextAgg, nextY, nextC };
-          }
-
-          if (!best){
-            stoppedBy = (targetYen>0||targetCopies>0) ? 'budget/copies' : (allowedInRadius ? 'dist' : 'no-candidate');
-            break;
-          }
-
-          selected.add(best.code);
-          agg = best.nextAgg;
-          totalYen = best.nextY; totalCps = best.nextC;
-          map.setFeatureState({source:"aichi", id: best.code}, {selected:true});
-          if (!seedLRU.has(best.code)) seedLRU.set(best.code, -1);
-
-          // ★ ループで増えていく町も媒体セットへ反映
-          autoExpandMediaFromBaseTown(String(best.code));
-
-          order = getInitialSeeds(allowedInRadius);
-
-          step++;
-          if ((step % 50) === 0){
-            updateAggregates();
-            updateAttrMetrics();
-            await sleep(0); 
-          }
-        }
-        updateAggregates();
-
-        const sAvgAge       = agg.ageN    ? agg.ageW/agg.ageN       : 0;
-        const sAvgAgeMale   = agg.maleN   ? agg.maleW/agg.maleN     : 0;
-        const sAvgAgeFemale = agg.femaleN ? agg.femaleW/agg.femaleN : 0;
-        const sAvgIncome    = agg.incN    ? agg.incW/agg.incN       : 0;
-
-        const parts = [];
-        parts.push(`選択 ${selected.size}件`);
-        parts.push(`平均年齢 ${fixed1(sAvgAge)}歳`);
-        parts.push(`男性 ${fixed1(sAvgAgeMale)}歳 / 女性 ${fixed1(sAvgAgeFemale)}歳`);
-        parts.push(`平均年収 ${fixed1(sAvgIncome)}万円`);
-
-        const totalYen10k    = Math.round(totalYen / 10000);
-        const totalCopies10k = Math.round(totalCps / 10000);
-
-        const yenHit    = (targetYen>0 && stoppedBy==='yen');
-        const copiesHit = (targetCopies>0 && stoppedBy==='copies');
-        const distHit   = (targetDist>0 && stoppedBy==='dist');
-        $("budgetInput")?.classList.toggle("hit", yenHit);
-        $("copiesInput")?.classList.toggle("hit", copiesHit);
-        $("distInput")?.classList.toggle("hit", distHit);
-
-        const tail = [];
-        if (targetYen>0)    tail.push(`<span class="${yenHit ? 'hitText' : ''}">料金 ${totalYen10k.toLocaleString()} / 目標 ${(targetYen/10000|0).toLocaleString()} 万円</span>`);
-        if (targetCopies>0) tail.push(`<span class="${copiesHit ? 'hitText' : ''}">部数 ${totalCopies10k.toLocaleString()} / 目標 ${(targetCopies/10000|0).toLocaleString()} 万部</span>`);
-        if (targetDist>0)   tail.push(`<span class="${distHit ? 'hitText' : ''}">半径 ${(targetDist/1000|0).toLocaleString()} km内</span>`);
-
-        msg.innerHTML = `自動選択（目標近似）: ${parts.join(" | ")}${tail.length? " | " + tail.join(" | ") : ""}${stoppedBy ? ` / 停止理由: ${stoppedBy}` : ""}`;
-      } finally {
-        finishAuto();
-      }
     }
 
     // ★ チェックされている属性キーを配列で返す
@@ -3855,6 +3851,12 @@
               fallbackCandidates.push({
                 code,
                 d: c.d,
+
+                railMin: (activeLineStationCentroids && activeLineStationCentroids.length)
+                  ? (getRailMinDistForTown(code) ?? Infinity)
+                  : Infinity,
+
+
                 addAttr: attr,
                 addPop: basePop,
                 nextY,
@@ -3867,18 +3869,24 @@
             const newRatio = newAttr / newPop;
             const score = newRatio; // 高いほど良い
 
-            if (!best ||
-                score > best.score ||
-                (score === best.score && c.d < best.d)) {
-              best = {
-                code,
-                score,
-                d: c.d,
-                attr,
-                basePop,
-                nextY,
-                nextC
-              };
+            const railOn = (activeLineStationCentroids && activeLineStationCentroids.length);
+            const m = railOn ? getRailMinDistForTown(code) : null;
+            const railMin = (m == null) ? Infinity : m;
+
+            if (!best) {
+              best = { code, score, d: c.d, attr, basePop, nextY, nextC, railMin };
+            } else if (railOn) {
+              // ★路線ON：駅に近い町を最優先、同点なら属性比率、最後に距離
+              if (railMin < best.railMin ||
+                (railMin === best.railMin && score > best.score) ||
+                (railMin === best.railMin && score === best.score && c.d < best.d)) {
+                best = { code, score, d: c.d, attr, basePop, nextY, nextC, railMin };
+              }
+            } else {
+              // 従来
+              if (score > best.score || (score === best.score && c.d < best.d)) {
+                best = { code, score, d: c.d, attr, basePop, nextY, nextC };
+              }
             }
           }
 
@@ -3887,7 +3895,13 @@
             //    さっき退避しておいた「スコア対象外」の町から
             //    距離が近い順に 1 件だけ拾う
             if (fallbackCandidates.length) {
-              fallbackCandidates.sort((a, b) => a.d - b.d);
+
+              if (activeLineStationCentroids && activeLineStationCentroids.length) {
+                fallbackCandidates.sort((a,b)=>(a.railMin - b.railMin) || (a.d - b.d));
+              } else {
+                fallbackCandidates.sort((a,b)=>a.d - b.d);
+              }              
+
               const f = fallbackCandidates[0];
 
               selected.add(f.code);

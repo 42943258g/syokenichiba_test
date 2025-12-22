@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.py
+
+# venv
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# pip / build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# --- VS Code ---
+.vscode/
+.history/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Logs ---
+*.log
+
+N02-20_Station.geojson
+
+# --- Optional: generated data outputs (choose as you like) ---
+# If your *.geojson are generated outputs, ignore them:
+# *.geojson
+
+# If you want to ignore CSV outputs but keep station_master.csv, use this:
+# *.csv
+# !station_master.csv
