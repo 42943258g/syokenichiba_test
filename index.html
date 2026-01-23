@@ -90,6 +90,26 @@
       opacity: 0.9;
     }
 
+    /* 部数（=配布量）を媒体ごとに倍率調整するスライダー */
+    .media-scale-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    input.media-scale {
+      width: 120px;
+    }
+    .media-scale-val {
+      font-size: 11px;
+      color: #374151;
+      min-width: 44px;
+      text-align: right;
+      user-select: none;
+    }
+    .media-scale-wrap.disabled {
+      opacity: 0.6;
+    }
+
     #mediaStats tbody tr.media-row {
       cursor: pointer;
       transition: background-color .12s ease, transform .06s ease;
@@ -387,6 +407,26 @@
         0 4px 12px rgba(37,99,235,.4);
     }
 
+    /* 自動選択後に「最適組み合わせ」「最適予算」を強調 */
+    .opt-emph {
+      position: relative;
+      background: linear-gradient(180deg, #f59e0b, #d97706);
+      color: #111827;
+      border-color: #b45309;
+      box-shadow:
+        0 0 0 2px rgba(245,158,11,.22),
+        0 10px 22px rgba(217,119,6,.28);
+      font-weight: 700;
+      animation: optPulse 1.15s ease-in-out infinite;
+    }
+    .opt-emph:hover { filter: brightness(1.03); }
+    .opt-emph:active { transform: translateY(1px); }
+    @keyframes optPulse {
+      0%   { box-shadow: 0 0 0 2px rgba(245,158,11,.20), 0 10px 22px rgba(217,119,6,.22); }
+      50%  { box-shadow: 0 0 0 4px rgba(245,158,11,.32), 0 14px 30px rgba(217,119,6,.30); }
+      100% { box-shadow: 0 0 0 2px rgba(245,158,11,.20), 0 10px 22px rgba(217,119,6,.22); }
+    }
+
     /* 文字を消して区切り線だけ出す */
     .auto-hint {
       margin-top: 10px;
@@ -583,14 +623,60 @@
     }
 
 
-  </style>
+  
+
+    /* ===== Busy overlay (center) ===== */
+    #busyOverlay.busy-overlay{
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none; /* don't block slider dragging */
+      user-select: none;
+    }
+    #busyOverlay.busy-overlay.show{ display: flex; }
+    #busyOverlay .busy-card{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      font-size: 14px;
+      line-height: 1.2;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+    #busyOverlay .busy-spinner{
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 4px solid rgba(255,255,255,0.35);
+      border-top-color: #fff;
+      animation: busySpin 0.8s linear infinite;
+      flex: 0 0 auto;
+    }
+    @keyframes busySpin { to { transform: rotate(360deg); } }
+</style>
 </head>
 <body>
   <div id="map"></div>
   <!-- ★ 現在ビュー表示（地図上の別枠） -->
   <div id="viewStatus" class="view-status"></div>
 
-  <div id="overlay" class="overlay">
+  
+  <!-- ★ Busy overlay（重い更新時に画面中央へ表示） -->
+  <div id="busyOverlay" class="busy-overlay" aria-live="polite" aria-label="更新中">
+    <div class="busy-card">
+      <div class="busy-spinner" aria-hidden="true"></div>
+      <div class="busy-text">更新中…</div>
+    </div>
+  </div>
+<div id="overlay" class="overlay">
     <div class="spinner"></div>
     <div id="overlayTitle" style="font-weight:700;margin-bottom:4px;">初期計算を準備中…</div>
     <div id="overlayMsg" class="muted">CSVと地図の読み込みを待機中</div>
@@ -686,6 +772,14 @@
           選択した属性の媒体別属性値
         </div>
         <div id="attrMetrics" class="attr-metrics muted"></div>
+
+        <!-- ★追加：最適組み合わせに絞る（type_master_all.csv の組み合わせから最良を選び、他媒体を除外） -->
+        <div class="stack" style="margin-top:6px;">
+          <button id="keepBestComboBtn" type="button">最適組み合わせに絞る</button>
+          
+          <button id="applyOptimalBudgetBtn" type="button">最適予算配分にする</button>
+<div id="keepBestComboHint" class="muted" style="font-size:11px;line-height:1.35;"></div>
+        </div>
       </div>
 
 
@@ -741,7 +835,28 @@
     const HH_TOTAL_KEY  = "世帯総数";
     const CAR_AVG_KEY   = "1世帯あたり乗用車保有台数";
     const STORE_KEY     = "店cd";
-    const CSV_TYPE   = "./type_master.csv";
+    // CSVの列名ゆれ対策（媒体マスタ側の「エリアコード/店CD」候補）
+    const MEDIA_AREA_KEYS = [
+      "エリアコード", "エリアCD", "エリアＣＤ", "エリアｃｄ",
+      "配布エリアコード", "配布エリアCD", "配布エリアＣＤ",
+      "店cd", "店CD", "店ＣＤ", "店ｃｄ", "店舗cd", "店舗CD",
+      "area_code", "area_cd", "AREA_CODE", "AREA_CD", "AreaCode", "AreaCd"
+    ];
+
+    // 媒体マスタ行から「店CD/エリアコード」を取得（列名ゆれ対応）
+    function getStoreCdFromRow(r){
+      if (!r) return "";
+      for (const k of MEDIA_AREA_KEYS){
+        const v = r[k];
+        if (v != null) {
+          const s = String(v).trim();
+          if (s !== "") return s;
+        }
+      }
+      return "";
+    }
+
+    const CSV_TYPE   = "./type_master_all.csv";
     const sleep = (ms=0) => new Promise(resolve => setTimeout(resolve, ms));
     const CSV_STATION = "./station_master.csv";
 
@@ -912,8 +1027,29 @@
       }
     }
 
+    
+    // ★ 自動選択後に「最適組み合わせ」「最適予算」ボタンを強調（全て解除ボタンで解除）
+let _optEmphOn = false;
 
-    // 停止ボタンと自動実行フラグ
+function _applyOptEmphClass(){
+  const b1 = document.getElementById('keepBestComboBtn');
+  const b2 = document.getElementById('applyOptimalBudgetBtn');
+  if (b1) b1.classList.toggle('opt-emph', !!_optEmphOn);
+  if (b2) b2.classList.toggle('opt-emph', !!_optEmphOn);
+}
+
+function clearOptimizeButtonEmph(){
+  _optEmphOn = false;
+  _applyOptEmphClass();
+}
+
+function emphasizeOptimizeButtons(){
+  _optEmphOn = true;
+  _applyOptEmphClass();
+}
+
+
+// 停止ボタンと自動実行フラグ
     let STOP = { requested: false };
     let IS_AUTO_RUNNING = false;
 
@@ -1138,6 +1274,10 @@
     // ★ 業態マスタ用
     let typeMasterRows = [];
     let typeMasterByGyotai = new Map();
+    let typeMasterByGyotaiCombo = new Map(); // gyotai -> comboKey -> {rows, meta}
+
+    // ★媒体名 -> 分類（媒体カテゴリ）
+    let mediaCategoryByName = new Map();
     let readyTown=false, readyMedia=false, readyGeo=false;
 
     // ★ 駅マスタ用（station_master.csv）
@@ -1279,7 +1419,7 @@
 
       for (const r of rowsForTown) {
         const mediaName = r["媒体名"] ?? "(名称不明)";
-        const store = r[STORE_KEY] != null ? String(r[STORE_KEY]) : "";
+        const store = getStoreCdFromRow(r);
         if (!store) continue;
 
 
@@ -1307,12 +1447,781 @@
 
     // 媒体名ごとの「全域に出ている町リスト」
     let mediaCodesAllByName = null;
+    // ★追加：媒体名 → エリアコード → 町コード集合（全域）
+    let mediaAreaToCodesAllByName = null;
+
 
 
     // ★ 媒体名ごとの ON/OFF 状態（true=対象 / false=対象外）
     let mediaEnabledByName = new Map();
 
-    // 基準の町（自動選択や手動クリックで使うメインのセット）
+    // ★追加：媒体ごとの部数/料金の倍率（1.0=100%）
+    //   スライダーで調整し、集計・自動選択・業態指標にも反映
+    let mediaScaleByName = new Map();
+
+
+    // === ★目標到達ロック（部数/料金目標を維持するためのスライダー制御） ===
+    const GOAL_LOCK = {
+      enabled: false,
+      targetYen: 0,
+      targetCopies: 0,
+
+      // ★全媒体合計で先に達した目標をゲージ基準にする
+      // 'yen' | 'cps' | null
+      basisMetric: null,
+
+      // ロック対象の媒体（目標到達時に設定がある媒体だけ）
+      activeMediaSet: new Set(),
+
+      // 媒体ごとの「店CD/エリア順」(表示対象になり得る範囲だけ)
+      areaOrderByMedia: new Map(),          // Map<mediaName, string[]>
+
+      // 媒体ごとの「エリア追加 1つあたりの増分」(areaOrder と同じ順)
+      areaGainByMedia: new Map(),           // Map<mediaName, Array<{yen:number,cps:number}>>
+
+      // 媒体単独で目標達成できる（または取得できた）店CD数
+      maxCountByMedia: new Map(),           // Map<mediaName, number>
+
+      // 現在のスライダー値（店CD数）
+      valueCountByMedia: new Map(),         // Map<mediaName, number>
+
+      // ロック中に使う『最大集合』（媒体の全域など）
+      maxSetByMedia: new Map(),             // Map<mediaName, Set<townCode>>
+
+      // 目標到達時点の「基準町追加順」と「選択セット」のスナップショット
+      baseTownOrderAtGoal: [],
+      selectedAtGoal: new Set(),
+    };
+
+    function isGoalLockOn(){ return !!(GOAL_LOCK && GOAL_LOCK.enabled); }
+
+    function clearGoalLock(){
+      GOAL_LOCK.enabled = false;
+      GOAL_LOCK.targetYen = 0;
+      GOAL_LOCK.targetCopies = 0;
+      GOAL_LOCK.basisMetric = null;
+      GOAL_LOCK.activeMediaSet = new Set();
+      GOAL_LOCK.areaOrderByMedia = new Map();
+      GOAL_LOCK.areaGainByMedia = new Map();
+      GOAL_LOCK.maxCountByMedia = new Map();
+      GOAL_LOCK.valueCountByMedia = new Map();
+      GOAL_LOCK.maxSetByMedia = new Map();
+      GOAL_LOCK.baseTownOrderAtGoal = [];
+      GOAL_LOCK.selectedAtGoal = new Set();
+    }
+
+    // 媒体×町 で料金・部数を取得（スケールは掛けない）
+    function getTownYenCopiesForMedia(townCode, mediaName, areaCodeOpt){
+      const code = String(townCode);
+      const m = String(mediaName);
+      const areaOpt = (areaCodeOpt != null && String(areaCodeOpt) !== "") ? String(areaCodeOpt) : null;
+      let yen = 0, cps = 0;
+      const rows = mediaIndex?.get(code) || [];
+      for (const r of rows) {
+        const nm = r["媒体名"] ?? "(名称不明)";
+        if (String(nm) !== m) continue;
+        if (areaOpt) {
+          const a = getMediaAreaCodeFromRow(r, code);
+          if (String(a) !== areaOpt) continue;
+        }
+        yen += toNumber(r["料金"]);
+        cps += toNumber(r["部数"]);
+      }
+      return { yen, cps };
+    }
+
+    // ロック用：エリア（=店CD/エリアコード）1つ追加したときの増分を計算
+    function computeAreaGainForMedia(mediaName, areaCode, maxSet){
+      const m = String(mediaName);
+      const codes = getCodesForAreaWithinMax(m, areaCode, maxSet);
+      let yen = 0, cps = 0;
+      for (const c of codes) {
+        const t = getTownYenCopiesForMedia(c, m, areaCode);
+        yen += t.yen;
+        cps += t.cps;
+      }
+      return { yen, cps };
+    }
+
+    // 目標到達時点の状態から、媒体ごとの「単独達成 max」と「現在値」を作る
+    function buildGoalLockFromCurrentSelection(targetYen, targetCopies, basisHint){
+      const ty = Math.round(Number(targetYen) || 0);
+      const tc = Math.round(Number(targetCopies) || 0);
+      if (!(ty > 0 || tc > 0)) { clearGoalLock(); return; }
+
+      clearGoalLock();
+      GOAL_LOCK.enabled = true;
+      GOAL_LOCK.targetYen = ty;
+      GOAL_LOCK.targetCopies = tc;
+
+      // ★基準メトリクス決定（両方設定時は、全媒体合計で先に達した側を使う）
+      // autoSelect から stoppedBy ('yen'|'copies'|'cps') を渡せる場合はそれを優先。
+      if (ty > 0 && tc > 0) {
+        const hint = (basisHint === 'yen') ? 'yen'
+          : (basisHint === 'cps' || basisHint === 'copies') ? 'cps'
+          : null;
+        if (hint) {
+          GOAL_LOCK.basisMetric = hint;
+        } else {
+          const tot = getCurrentAllMediaTotals();
+          const yenHit = tot.yen >= ty;
+          const cpsHit = tot.cps >= tc;
+          if (yenHit && !cpsHit) GOAL_LOCK.basisMetric = 'yen';
+          else if (cpsHit && !yenHit) GOAL_LOCK.basisMetric = 'cps';
+          else if (!yenHit && !cpsHit) {
+            // まだどちらにも到達していない場合：到達率が高い方
+            const ry = ty > 0 ? (tot.yen / ty) : 0;
+            const rc = tc > 0 ? (tot.cps / tc) : 0;
+            GOAL_LOCK.basisMetric = (ry >= rc) ? 'yen' : 'cps';
+          } else {
+            // 両方到達している場合：より「ぎりぎり」側（超過率が小さい方）
+            const ry = ty > 0 ? (tot.yen / ty) : 999;
+            const rc = tc > 0 ? (tot.cps / tc) : 999;
+            GOAL_LOCK.basisMetric = (ry <= rc) ? 'yen' : 'cps';
+          }
+        }
+      } else if (ty > 0) {
+        GOAL_LOCK.basisMetric = 'yen';
+      } else if (tc > 0) {
+        GOAL_LOCK.basisMetric = 'cps';
+      } else {
+        GOAL_LOCK.basisMetric = null;
+      }
+
+      GOAL_LOCK.baseTownOrderAtGoal = Array.isArray(baseSelectOrder) ? baseSelectOrder.slice() : [];
+      GOAL_LOCK.selectedAtGoal = new Set(selected);
+
+
+      if (!mediaCodesAllByName) { clearGoalLock(); return; }
+
+      // 距離（半径）制約は “条件” として適用（距離順では並べない）
+      const targetDist = Math.round(toNumber($("distInput")?.value) * 1000);
+      const centerForRadius =
+        centroidOf(baseCode || "") ??
+        lastClickLngLat ??
+        getMapCenterLngLat();
+
+      let allowedInRadius = null;
+      if (targetDist > 0 && centerForRadius && PRE && PRE.size) {
+        allowedInRadius = new Set();
+        for (const f of allFeatures) {
+          const code = String(f.code);
+          const p = PRE.get(code);
+          if (!p) continue;
+          if (distMeters(centerForRadius, p.centroid) <= targetDist) {
+            allowedInRadius.add(code);
+          }
+        }
+      }
+      const inRadiusFast = (code) => !allowedInRadius || allowedInRadius.has(String(code));
+
+      // 条件スコア（属性優先のときと同じ）
+      const attrKeys = (typeof getSelectedAttributeKeys === 'function') ? getSelectedAttributeKeys() : [];
+      const railOn = !!(activeLineStationCentroids && activeLineStationCentroids.length);
+
+      function getAttrStat(code){
+        const row = townIndex?.get(String(code));
+        if (!row) return { attr: 0, basePop: 0 };
+        let attr = 0;
+        for (const key of attrKeys) { attr += toNumber(row[key]); }
+        const basePop = toNumber(row[POP_TOTAL_KEY] ?? 0);
+        return { attr, basePop };
+      }
+
+      function townScoreObj(code){
+        let score = 0;
+        if (attrKeys && attrKeys.length) {
+          const { attr, basePop } = getAttrStat(code);
+          if (basePop > 0 && attr > 0) score = attr / basePop;
+        }
+        const railMin = railOn ? (getRailMinDistForTown(String(code)) ?? Infinity) : Infinity;
+        return { score, railMin };
+      }
+
+      for (const [name] of mediaCodesAllByName.entries()) {
+        const m = String(name);
+
+        // ★ 目標到達時点の「その媒体が実際に取れていた分」（prefix）を先頭に置く
+        const currentMaxSet = getMaxCodesForMedia(m); // 選択済み ∩ 媒体
+        const currentAreas = getMaxAreasForMedia(m, currentMaxSet);
+        const orderArr = (mediaAreaOrderByName.get(m) || []).map(String);
+        let prefix = orderArr.filter(a => currentAreas.has(a));
+        if (!prefix.length && currentAreas && currentAreas.size) {
+          const tmp = [];
+          const seen = new Set();
+          for (const c0 of (GOAL_LOCK.baseTownOrderAtGoal || [])) {
+            const code = String(c0);
+            if (!currentMaxSet.has(code)) continue;
+            const rowsForTown = mediaIndex?.get(code) || [];
+            for (const r of rowsForTown) {
+              const mm = r["媒体名"] ?? "(名称不明)";
+              if (String(mm) !== m) continue;
+              const a = getMediaAreaCodeFromRow(r, code);
+              if (!currentAreas.has(String(a))) continue;
+              if (seen.has(String(a))) continue;
+              seen.add(String(a));
+              tmp.push(String(a));
+            }
+          }
+          prefix = tmp.length ? tmp : Array.from(currentAreas).map(String);
+        }
+        const prefixSet = new Set(prefix);
+
+        // ★ B：ロック時の maxSet は “媒体の全域”（＝CSVで取得できた店CD）
+        const allCodes = mediaCodesAllByName.get(m) || new Set();
+        const universe = new Set();
+        for (const c of allCodes) {
+          const k = String(c);
+          if (inRadiusFast(k)) universe.add(k);
+        }
+        if (!universe.size) continue;
+        GOAL_LOCK.maxSetByMedia.set(m, universe);
+
+        const universeAreas = getMaxAreasForMedia(m, universe);
+        if (!universeAreas || !universeAreas.size) continue;
+
+        // === 目標達成後の「追加分」：距離/路線/属性 の“優先度”で店CD(エリア)を並べる ===
+        // ポイント：店CDが複数の町にまたがるため、「町順で拾う」と遠隔地が混ざりやすい。
+        // そこで、各エリアに紐づく町の「最短距離（& 路線最短）」で近い順に並べ、
+        // 自動選択（距離優先）の“増やし方”に近づける。
+
+        const originForOrder =
+          centroidOf(baseCode||"") ??
+          lastClickLngLat ??
+          getMapCenterLngLat();
+
+        // prefix は「目標到達時点で取れていたエリア」：そのまま先頭固定
+        const orderedAreas = [];
+        const orderedAreaSet = new Set();
+        for (const a of prefix) {
+          const aa = String(a);
+          if (!universeAreas.has(aa)) continue;
+          if (orderedAreaSet.has(aa)) continue;
+          orderedAreas.push(aa);
+          orderedAreaSet.add(aa);
+        }
+
+        // 残りエリアをスコアリング（距離優先 / 路線優先 / 属性優先はここで反映）
+        const areaMap = getAreaMapAll(m);
+        const remainAreas = [];
+        for (const a of universeAreas) {
+          const aa = String(a);
+          if (orderedAreaSet.has(aa)) continue;
+
+          let minDist = Infinity;
+          let bestRail = Infinity;
+          let bestScore = 0;
+
+          if (areaMap && areaMap.has(aa)) {
+            for (const code of areaMap.get(aa)) {
+              const k = String(code);
+              if (!universe.has(k)) continue;
+
+              // 距離
+              const p = PRE?.get(k);
+              const cent = p?.centroid || centroidOf(k);
+              if (cent && originForOrder) {
+                const d = distMeters(originForOrder, cent);
+                if (d < minDist) minDist = d;
+              }
+
+              // 路線
+              if (railOn) {
+                const r = getRailMinDistForTown(k);
+                const rm = (r == null) ? Infinity : r;
+                if (rm < bestRail) bestRail = rm;
+              }
+
+              // 属性（属性優先時のみ意味がある）
+              if (attrKeys && attrKeys.length) {
+                const st = getAttrStat(k);
+                if (st.basePop > 0 && st.attr > 0) {
+                  const s = st.attr / st.basePop;
+                  if (s > bestScore) bestScore = s;
+                }
+              }
+            }
+          } else {
+            // フォールバック：エリア=町
+            const k = aa.startsWith('TOWN:') ? aa.slice(5) : aa;
+            if (universe.has(String(k))) {
+              const p = PRE?.get(String(k));
+              const cent = p?.centroid || centroidOf(String(k));
+              if (cent && originForOrder) minDist = distMeters(originForOrder, cent);
+              if (railOn) {
+                const r = getRailMinDistForTown(String(k));
+                bestRail = (r == null) ? Infinity : r;
+              }
+              if (attrKeys && attrKeys.length) {
+                const st = getAttrStat(String(k));
+                if (st.basePop > 0 && st.attr > 0) bestScore = st.attr / st.basePop;
+              }
+            }
+          }
+
+          remainAreas.push({ a: aa, minDist, railMin: bestRail, score: bestScore });
+        }
+
+        remainAreas.sort((x,y)=>{
+          // 路線選択中：駅に近い店CD優先
+          if (railOn && x.railMin !== y.railMin) return x.railMin - y.railMin;
+
+          // 属性優先：スコア高い店CD優先（同点は近い順）
+          if (attrKeys && attrKeys.length && y.score !== x.score) return y.score - x.score;
+
+          // 距離優先：近い店CD優先（ここが“遠隔地が先に入る”の防止）
+          if (x.minDist !== y.minDist) return x.minDist - y.minDist;
+
+          return String(x.a).localeCompare(String(y.a), 'ja');
+        });
+
+        for (const o of remainAreas) {
+          if (orderedAreaSet.size >= universeAreas.size) break;
+          if (orderedAreaSet.has(o.a)) continue;
+          orderedAreas.push(o.a);
+          orderedAreaSet.add(o.a);
+        }
+
+        const ordered = orderedAreas.filter(a => universeAreas.has(String(a)));
+        if (!ordered.length) continue;
+
+        // エリアごとの増分（universe 内で計算）
+        const gains = ordered.map(a => computeAreaGainForMedia(m, a, universe));
+
+        // “設定がない媒体” 判定（増分がゼロなら不要）
+        let sumY = 0, sumC = 0;
+        for (const g of gains) { sumY += g.yen; sumC += g.cps; }
+        if (!(sumY > 0 || sumC > 0)) continue;
+
+        // 単独達成に必要な店CD数（達成できない場合は取得できた範囲まで）
+        let accY = 0, accC = 0;
+        let need = gains.length;
+        for (let i = 0; i < gains.length; i++) {
+          accY += gains[i].yen;
+          accC += gains[i].cps;
+          // ★両方設定時は、全媒体合計で先に達した側（basisMetric）だけを100%基準にする
+          let hit = false;
+          if (ty > 0 && tc > 0) {
+            hit = (GOAL_LOCK.basisMetric === 'yen') ? (accY >= ty) : (accC >= tc);
+          } else {
+            hit = ((ty <= 0 || accY >= ty) && (tc <= 0 || accC >= tc));
+          }
+          if (hit) { need = i + 1; break; }
+        }
+
+        const maxCount = Math.max(1, Math.min(need, gains.length));
+
+        // 目標到達時点のゲージ位置（＝その時点で取得できていた prefix 分）に戻す
+        const currentCount = prefix.length;
+        const initVal = Math.max(0, Math.min(currentCount, maxCount));
+
+        GOAL_LOCK.activeMediaSet.add(m);
+        GOAL_LOCK.areaOrderByMedia.set(m, ordered);
+        GOAL_LOCK.areaGainByMedia.set(m, gains);
+        GOAL_LOCK.maxCountByMedia.set(m, maxCount);
+        GOAL_LOCK.valueCountByMedia.set(m, initVal);
+
+        recomputeMediaDisplaySet(m);
+        updateSliderUIForMedia(m);
+      }
+    }
+
+    // ロック中の合計（増分配列の prefix で高速に計算）
+    function getCurrentAllMediaTotalsLocked(){
+      let yen = 0, cps = 0;
+      for (const m of GOAL_LOCK.activeMediaSet) {
+        if (!isMediaEnabled(m)) continue;
+        const gains = GOAL_LOCK.areaGainByMedia.get(m) || [];
+        const v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+        for (let i = 0; i < v && i < gains.length; i++) {
+          yen += gains[i].yen;
+          cps += gains[i].cps;
+        }
+      }
+      return { yen, cps };
+    }
+
+    // === ★更新：媒体ごとの「エリアコード単位」で選択順を記憶＆スライダー連動の表示セット ===
+    // 基準ビューで町が追加された順（重複なし・再選択時は末尾へ）
+    const baseSelectOrder = [];
+
+    // 媒体ごとの「エリアコードが追加された順」（重複なし・再選択時は末尾へ）
+    const mediaAreaOrderByName = new Map(); // Map<mediaName, string[]>
+
+    // 媒体ビューで“表示に使う”選択セット（スライダー値に応じてエリア単位で増減した結果）
+    const mediaDisplayByName = new Map(); // Map<mediaName, Set<townCode>>
+
+    // ★追加：媒体ビューで“表示に使う”エリア（店CD）集合（スライダー選択の本体）
+    const mediaDisplayAreasByName = new Map(); // Map<mediaName, Set<areaCode>>
+    function _arrayMoveToEndUnique(arr, value) {
+      const v = String(value);
+      const i = arr.indexOf(v);
+      if (i >= 0) arr.splice(i, 1);
+      arr.push(v);
+    }
+
+    function _arrayAddUnique(arr, value) {
+      const v = String(value);
+      if (!arr.includes(v)) arr.push(v); // 既出なら何もしない
+    }
+
+
+    function getMediaAreaCodeFromRow(r, townCode) {
+      const s = getStoreCdFromRow(r);
+      if (s) return String(s); // 店CD/エリアコードを必ず使う（列名ゆれ対応）
+      return `TOWN:${String(townCode)}`;
+    }
+
+    function getMediaNamesForTown(code) {
+      const rows = mediaIndex?.get(String(code)) || [];
+      const set = new Set();
+      for (const r of rows) {
+        const n = r["媒体名"] ?? "(名称不明)";
+        set.add(String(n));
+      }
+      return [...set];
+    }
+
+    function getAreaCodesForTownMedia(code, mediaName) {
+      const rows = mediaIndex?.get(String(code)) || [];
+      const out = new Set();
+      for (const r of rows) {
+        const m = r["媒体名"] ?? "(名称不明)";
+        if (String(m) !== String(mediaName)) continue;
+        out.add(getMediaAreaCodeFromRow(r, code));
+      }
+      return [...out];
+    }
+
+    // 基準の町が追加されたときに順序を記憶（＋媒体別「エリアコード順序」も更新）
+    function rememberTownAddedToBase(code) {
+      const c = String(code);
+      _arrayAddUnique(baseSelectOrder, c);
+
+      // この町に存在する媒体だけ、媒体別の「エリアコード順序」に反映
+      const mediaNames = getMediaNamesForTown(c);
+      for (const m of mediaNames) {
+        const areas = getAreaCodesForTownMedia(c, m);
+        let arr = mediaAreaOrderByName.get(m);
+        if (!arr) {
+          arr = [];
+          mediaAreaOrderByName.set(m, arr);
+        }
+        for (const a of areas) {
+          _arrayAddUnique(arr, a);
+        }
+      }
+    }
+
+    // ある媒体・ある町の「部数（未スケール）」
+    function getTownCopiesForMedia(code, mediaName) {
+      const rows = mediaIndex?.get(String(code)) || [];
+      let cps = 0;
+      for (const r of rows) {
+        const m = r["媒体名"] ?? "(名称不明)";
+        if (String(m) !== String(mediaName)) continue;
+        cps += toNumber(r["部数"]);
+      }
+      return cps;
+    }
+
+    // この媒体で「最大（=元）」となる選択集合（明示セットがあればそれ、なければ基準選択∩媒体有）
+    function getMaxCodesForMedia(mediaName) {
+      const explicit = mediaViewByName.get(mediaName);
+      // 明示セットが存在するなら（空でも）それを最大セットとする
+      if (explicit !== undefined && explicit !== null) return new Set([...explicit].map(String));
+      const allCodes = mediaCodesAllByName?.get(mediaName) || new Set();
+      const s = new Set();
+      for (const c of selected) {
+        const k = String(c);
+        if (allCodes.has(k)) s.add(k);
+      }
+      return s;
+    }
+
+    function getAreaMapAll(mediaName) {
+      return mediaAreaToCodesAllByName?.get(String(mediaName)) || null;
+    }
+
+    function getMaxAreasForMedia(mediaName, maxSet) {
+      const areaMap = getAreaMapAll(mediaName);
+      const out = new Set();
+      if (areaMap) {
+        for (const [a, codes] of areaMap.entries()) {
+          for (const c of codes) {
+            if (maxSet.has(String(c))) { out.add(String(a)); break; }
+          }
+        }
+        return out;
+      }
+      // フォールバック：町コードを疑似エリアとして扱う
+      for (const c of maxSet) out.add(`TOWN:${String(c)}`);
+      return out;
+    }
+
+    function getCodesForAreaWithinMax(mediaName, areaCode, maxSet) {
+      const a = String(areaCode);
+      const out = new Set();
+      const areaMap = getAreaMapAll(mediaName);
+      if (areaMap && areaMap.has(a)) {
+        for (const c of areaMap.get(a)) {
+          const k = String(c);
+          if (maxSet.has(k)) out.add(k);
+        }
+        return out;
+      }
+      // フォールバック：TOWN:<code> 形式
+      if (a.startsWith('TOWN:')) {
+        const k = a.slice(5);
+        if (maxSet.has(k)) out.add(k);
+        return out;
+      }
+      // 最後の手段：そのまま町コードとして扱う
+      if (maxSet.has(a)) out.add(a);
+      return out;
+    }
+
+    
+    // ★ 目標ロック用：媒体の「最大集合（universe）」が未生成/空なら、その場で作る（半径制約も反映）
+    function ensureGoalLockUniverse(mediaName){
+      const m = String(mediaName);
+      if (!isGoalLockOn() || !GOAL_LOCK) return null;
+
+      // ★ buildGoalLockFromCurrentSelection では「その時点の選択」に基づく maxSet が入っていることがあるため、
+      //   目標ロック中は「媒体の全候補（＋半径制約）」を一度だけ生成してキャッシュする。
+      if (!GOAL_LOCK._universeReadyByMedia) GOAL_LOCK._universeReadyByMedia = new Set();
+
+      const cached = GOAL_LOCK.maxSetByMedia?.get(m);
+      if (cached && cached.size && GOAL_LOCK._universeReadyByMedia.has(m)) return cached;
+
+      const allCodes = mediaCodesAllByName?.get(m);
+      if (!allCodes || !allCodes.size) return null;
+
+      // 距離（半径）制約
+      const targetDist = Math.round(toNumber($("distInput")?.value) * 1000);
+      const centerForRadius =
+        centroidOf(baseCode || "") ??
+        lastClickLngLat ??
+        getMapCenterLngLat();
+
+      const out = new Set();
+      if (targetDist > 0 && centerForRadius) {
+        for (const c0 of allCodes) {
+          const code = String(c0);
+          const p = PRE.get(code);
+          if (!p || !p.centroid) continue;
+          if (distMeters(centerForRadius, p.centroid) <= targetDist) out.add(code);
+        }
+      } else {
+        for (const c0 of allCodes) out.add(String(c0));
+      }
+
+      if (out.size) {
+        try {
+          GOAL_LOCK.maxSetByMedia.set(m, out);      // ★上書き
+          GOAL_LOCK._universeReadyByMedia.add(m);   // ★これ以降はキャッシュを返す
+        } catch(e) {}
+        return out;
+      }
+      return null;
+    }
+
+
+
+    // ★ 目標ロック用：媒体のロック情報（order/gain/maxCount）を未生成なら作る
+    function ensureGoalLockMediaPrepared(mediaName){
+      const m = String(mediaName);
+      if (!isGoalLockOn() || !GOAL_LOCK) return false;
+
+      let uni = ensureGoalLockUniverse(m) || GOAL_LOCK.maxSetByMedia.get(m);
+      if (!uni || !uni.size) return false;
+
+      const gains0 = GOAL_LOCK.areaGainByMedia.get(m);
+      const order0 = GOAL_LOCK.areaOrderByMedia.get(m);
+      const max0 = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+      if (gains0 && gains0.length && order0 && order0.length && max0 > 0) return true;
+
+      const areas = getMaxAreasForMedia(m, uni);
+      if (!areas || !areas.size) return false;
+
+      const baseOrder = (mediaAreaOrderByName.get(m) || []);
+      const fallbackOrder = (order0 || []);
+      const orderArr = (baseOrder.length ? baseOrder : fallbackOrder).map(String);
+
+      let ordered = [];
+      if (orderArr.length){
+        ordered = orderArr.filter(a => areas.has(String(a))).map(String);
+      }
+      const setOrd = new Set(ordered);
+      for (const a of areas){
+        const aa = String(a);
+        if (!setOrd.has(aa)) ordered.push(aa);
+      }
+      if (!ordered.length) return false;
+
+      const gains = ordered.map(a => computeAreaGainForMedia(m, a, uni));
+
+      const ty = Math.round(Number(GOAL_LOCK.targetYen) || 0);
+      const tc = Math.round(Number(GOAL_LOCK.targetCopies) || 0);
+      let accY = 0, accC = 0;
+      let need = gains.length;
+      for (let i=0; i<gains.length; i++){
+        accY += toNumber(gains[i]?.yen || 0);
+        accC += toNumber(gains[i]?.cps || 0);
+        let hit = false;
+        if (ty > 0 && tc > 0) {
+          hit = (GOAL_LOCK.basisMetric === 'yen') ? (accY >= ty) : (accC >= tc);
+        } else {
+          hit = ((ty <= 0 || accY >= ty) && (tc <= 0 || accC >= tc));
+        }
+        if (hit) { need = i + 1; break; }
+      }
+      const maxCount = Math.max(1, Math.min(need, gains.length));
+
+      GOAL_LOCK.maxSetByMedia.set(m, uni);
+      GOAL_LOCK.areaOrderByMedia.set(m, ordered);
+      GOAL_LOCK.areaGainByMedia.set(m, gains);
+      GOAL_LOCK.maxCountByMedia.set(m, maxCount);
+      if (!GOAL_LOCK.valueCountByMedia.has(m)) GOAL_LOCK.valueCountByMedia.set(m, 0);
+      return true;
+    }
+// スライダー値に応じて「表示用の選択集合」を作る（店CD/エリアコード単位で増減）
+    function recomputeMediaDisplaySet(mediaName) {
+      const m = String(mediaName);
+      if (!isMediaEnabled(m)) {
+        mediaDisplayByName.set(m, new Set());
+        mediaDisplayAreasByName.set(m, new Set());
+        return;
+      }
+      let maxSet = getMaxCodesForMedia(m);
+      if (isGoalLockOn() && GOAL_LOCK.activeMediaSet.has(m)) {
+        const uni = ensureGoalLockUniverse(m) || GOAL_LOCK.maxSetByMedia.get(m);
+        if (uni && uni.size) maxSet = uni;
+      }
+      if (!maxSet.size) {
+        mediaDisplayByName.set(m, new Set());
+        mediaDisplayAreasByName.set(m, new Set());
+        return;
+      }
+
+      // 最大セット内に存在する「エリアコード」集合
+      const maxAreas = getMaxAreasForMedia(m, maxSet);
+      if (!maxAreas.size) {
+        mediaDisplayByName.set(m, new Set());
+        mediaDisplayAreasByName.set(m, new Set());
+        return;
+      }
+
+      // エリアの並び（目標ロック中は lock order、それ以外は媒体別順→無ければ基準順から推定）
+      const orderArr = mediaAreaOrderByName.get(m) || [];
+      let orderedAreas = [];
+
+      if (isGoalLockOn() && GOAL_LOCK.activeMediaSet.has(m)) {
+        const lockOrder = GOAL_LOCK.areaOrderByMedia.get(m) || [];
+        orderedAreas = lockOrder.map(String).filter(a => maxAreas.has(a));
+      } else if (orderArr.length) {
+        orderedAreas = orderArr.map(String).filter(a => maxAreas.has(a));
+      } else {
+        const tmp = [];
+        const seen = new Set();
+        for (const c0 of baseSelectOrder) {
+          const c = String(c0);
+          if (!maxSet.has(c)) continue;
+          const rows = mediaIndex?.get(c) || [];
+          for (const r of rows) {
+            const mm = r["媒体名"] ?? "(名称不明)";
+            if (String(mm) !== m) continue;
+            const a = getMediaAreaCodeFromRow(r, c);
+            if (!maxAreas.has(a)) continue;
+            if (seen.has(a)) continue;
+            seen.add(a);
+            tmp.push(a);
+          }
+        }
+        orderedAreas = tmp;
+      }
+
+      // 順序配列に無いエリアは末尾に補完
+      const setOrdered = new Set(orderedAreas);
+      for (const a of maxAreas) {
+        if (!setOrdered.has(a)) orderedAreas.push(a);
+      }
+
+      // ★ 採用数を決める：通常は％、目標ロック中は「店CD数」
+      let keepN = 0;
+      if (isGoalLockOn() && GOAL_LOCK.activeMediaSet.has(m)) {
+        const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+        const v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+        keepN = Math.max(0, Math.min(v, maxCount));
+      } else {
+        const scale = getMediaScale(m);
+        if (!isFinite(scale) || scale <= 0) {
+          mediaDisplayByName.set(m, new Set());
+          mediaDisplayAreasByName.set(m, new Set());
+          return;
+        }
+        if (scale >= 0.9999) {
+          keepN = orderedAreas.length;
+        } else {
+          keepN = Math.max(0, Math.round(orderedAreas.length * scale));
+        }
+      }
+
+      const chosenAreas = orderedAreas.slice(0, keepN);
+      mediaDisplayAreasByName.set(m, new Set(chosenAreas.map(String)));
+      const out = new Set();
+      for (const a of chosenAreas) {
+        for (const c of getCodesForAreaWithinMax(m, a, maxSet)) out.add(c);
+      }
+      mediaDisplayByName.set(m, out);
+    }
+
+    function getMediaDisplaySet(mediaName) {
+      const m = String(mediaName);
+      // ★ townSet / areaSet のどちらかが未生成 or クリアされたら必ず再計算
+      if (!mediaDisplayByName.has(m) || !mediaDisplayAreasByName.has(m)) {
+        recomputeMediaDisplaySet(m);
+      }
+      return mediaDisplayByName.get(m) || new Set();
+    }
+
+    function getMediaDisplayAreaSet(mediaName) {
+      const m = String(mediaName);
+      // ★ townSet / areaSet のどちらかが未生成 or クリアされたら必ず再計算
+      if (!mediaDisplayByName.has(m) || !mediaDisplayAreasByName.has(m)) {
+        recomputeMediaDisplaySet(m);
+      }
+      return mediaDisplayAreasByName.get(m) || new Set();
+    }
+
+    // ★ 店CD（=エリア）単位でのスライダー選択を、行（媒体CSVの1行）に対して判定
+    function isRowInMediaDisplay(mediaName, townCode, row) {
+      const m = String(mediaName);
+      const codeStr = String(townCode);
+      const areaSet = getMediaDisplayAreaSet(m);
+      if (areaSet && areaSet.size) {
+        const a = getMediaAreaCodeFromRow(row, codeStr);
+        return areaSet.has(String(a));
+      }
+      const townSet = getMediaDisplaySet(m);
+      return !!(townSet && townSet.size && townSet.has(codeStr));
+    }
+
+    // 町の選択追加/解除が起きたときに、関連媒体の表示セットを更新
+    function refreshMediaDisplaysForTown(code) {
+      const mediaNames = getMediaNamesForTown(String(code));
+      for (const m of mediaNames) {
+        recomputeMediaDisplaySet(m);
+      }
+      // 今表示している媒体なら、地図の表示セットも即時更新
+      if (viewMode === "media" && currentMediaName) {
+        const disp = getMediaDisplaySet(currentMediaName);
+        mediaViewSet = new Set(disp);
+        applyViewSelection();
+      }
+    }
+
+// 基準の町（自動選択や手動クリックで使うメインのセット）
     const selected = new Set();
 
     // ★追加：前回 onLine を付けた町（解除用）
@@ -1405,6 +2314,8 @@
 
     // 基準の町＆円
     let baseCode = null, prevBaseCode = null;
+    let baseInsideLabel = "";
+    function getCenterInsideLabel(){ return baseInsideLabel || ""; }
     const centroidOf = (code)=>{ const f = allFeatures.find(x=>x.code===String(code)); return f?.centroid || null; };
     const bboxOf = (code)=> (bboxCsvByCode.get(String(code)) || featureBboxByCode.get(String(code)) || null);
     const getMapCenterLngLat = ()=>{ const c = map.getCenter(); return [c.lng, c.lat]; };
@@ -1440,10 +2351,12 @@
 
       // 距離目標があっても、中心点の町は必ず 0m なのでここでは特に判定不要
       selected.add(baseStr);
+      rememberTownAddedToBase(baseStr);
       map.setFeatureState({ source: "aichi", id: baseStr }, { selected: true });
 
       // 基準町を起点に媒体セットも広げる
       autoExpandMediaFromBaseTown(baseStr);
+      refreshMediaDisplaysForTown(baseStr);
     }
 
 
@@ -1464,6 +2377,7 @@
           );
         }
         prevBaseCode = baseCode;
+        if (!baseCode) baseInsideLabel = "";
 
         const pt = centroidOf(baseCode || "");
 
@@ -1474,6 +2388,8 @@
           const row = townIndex.get(baseCodeStr);
           labelName =
             `${row["市区町村名"] ?? ""} ${row["町丁目名"] ?? ""}`.trim() || baseCodeStr;
+          const muni = String(row["市区町村名"] ?? "").trim();
+          baseInsideLabel = muni.startsWith("名古屋市") ? "名古屋市内" : "名古屋市外";
         }
 
         // GeoJSON をセット（name プロパティ付き）
@@ -1518,7 +2434,7 @@
         const stores = [...new Set(
           rowsForTown
             .filter(r => (r["媒体名"] ?? "(名称不明)") === currentMediaName)
-            .map(r => r[STORE_KEY])
+            .map(r => getStoreCdFromRow(r))
             .filter(v => v != null && v !== "")
             .map(v => String(v))
         )];
@@ -1591,9 +2507,31 @@
 
 
 
-    function isMediaEnabled(name) {
+    
+
+    // ★ 媒体名のゆれ（前後スペース等）を吸収する
+    const normMediaName = (v) => {
+      const s = String(v ?? "(名称不明)");
+      const t = s.trim();
+      return t ? t : "(名称不明)";
+    };
+
+function isMediaEnabled(name) {
       if (!name) return true;
       return mediaEnabledByName.get(String(name)) !== false;
+    }
+
+
+
+    // ★ 媒体ごとの部数/料金の倍率（0%〜）
+    function getMediaScale(name) {
+      const v = mediaScaleByName?.get(String(name));
+      const n = Number(v);
+      return (Number.isFinite(n) && n >= 0) ? n : 1;
+    }
+    function setMediaScale(name, scale) {
+      const s = Number(scale);
+      mediaScaleByName.set(String(name), (Number.isFinite(s) ? Math.max(0, Math.min(1, s)) : 1));
     }
 
 
@@ -1637,6 +2575,8 @@
       map.getSource("target-radius")?.setData(fc);
     }
 
+    let __suppressMediaEnabledRecalc = false;
+
     function setMediaEnabled(name, enabled) {
       name = String(name);
       mediaEnabledByName.set(name, !!enabled);
@@ -1651,6 +2591,11 @@
           btn.classList.toggle("off", !enabled);
           btn.textContent = enabled ? "対象" : "除外中";
         }
+
+        const wrap = tr.querySelector(".media-scale-wrap");
+        if (wrap) wrap.classList.toggle("disabled", !enabled);
+        const slider = tr.querySelector(".media-scale");
+        if (slider) slider.disabled = !enabled;
       });
 
       // --- 属性サマリ側のチェックも同期 ---
@@ -1660,20 +2605,178 @@
         }
       });
 
-      // 再集計・業態指標も更新
-      updateAggregates();
-      renderTypeMetrics();
+      // 再集計・業態指標も更新（※一括変更中は最後にまとめて更新）
+      if (!__suppressMediaEnabledRecalc) {
+        updateAggregates();
+        renderTypeMetrics();
 
-      // ★ 属性比較テーブルも更新（基準の町の部数などを再計算）
+        // ★ 属性比較テーブルも更新（基準の町の部数などを再計算）
+        updateAttrMetrics();
+      }
+    }
+
+    // ★追加：最適組み合わせに絞る（媒体カテゴリ単位で ON/OFF を一括適用）
+    
+    // ★追加：最適組み合わせに絞る（媒体カテゴリ単位で ON/OFF を一括適用）
+    
+    // ★全媒体名の一覧（媒体マスタのキー）を取得
+    function getAllMediaNames(){
+      try {
+        return Array.from(mediaCodesAllByName?.keys?.() || []);
+      } catch(e) {
+        return [];
+      }
+    }
+
+function applyBestComboToEnabledMedia(bestGroup){
+      // 「最適組み合わせに絞る」は、対象外媒体を“対象外（チェックOFF）”にするだけ。
+      // 予算配分（0から積み上げ等）はここでは一切しない。
+      if (!bestGroup || !bestGroup.cats) return;
+      if (!mediaEnabledByName || !mediaCodesAllByName) return;
+
+      const keepCats = new Set((bestGroup.cats || []).map(normalizeTypeCategory).filter(Boolean));
+
+      // 1) チェックON/OFF（対象/除外）だけを一括で切り替える（DOM更新も同期）
+      __suppressMediaEnabledRecalc = true;
+      try {
+        for (const name of mediaCodesAllByName.keys()) {
+          const m = String(name);
+          const cat = normalizeTypeCategory(mediaCategoryByName.get(m) || "");
+          const keep = keepCats.has(cat);
+          setMediaEnabled(m, !!keep);
+        }
+      } finally {
+        __suppressMediaEnabledRecalc = false;
+      }
+
+      // 2) 目標ロック中：非対象媒体は valueCount=0 にして影響を消す（対象媒体の値は維持）
+      //    ※ buildGoalLockFromCurrentSelection() などの“作り直し”はしない（=ゲージが勝手に変わるのを防ぐ）
+      if (isGoalLockOn()) {
+        const nextActive = new Set();
+        for (const m0 of getAllMediaNames()){
+          const m = String(m0);
+          if (!isMediaEnabled(m)) {
+            GOAL_LOCK.valueCountByMedia.set(m, 0);
+            continue;
+          }
+          ensureGoalLockMediaPrepared(m);
+          const v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+          const mx = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+          GOAL_LOCK.valueCountByMedia.set(m, Math.min(v, mx));
+          nextActive.add(m);
+        }
+        GOAL_LOCK.activeMediaSet = nextActive;
+      }
+
+      // 3) 表示セットを再計算（対象/除外の切替を即反映）
+      for (const m0 of getAllMediaNames()){
+        const m = String(m0);
+        recomputeMediaDisplaySet(m);
+        updateSliderUIForMedia(m);
+      }
+
+      // 4) 媒体ビュー中なら、表示している媒体のセットを同期（ここをやらないと地図が更新されない）
+      syncMediaViewSetIfNeeded();
+
+      // 5) 再描画・再集計（最後にまとめて）
+      applyViewSelection();
+      updateAggregates();
+      updateViewStatus();
+      renderTypeMetrics();
       updateAttrMetrics();
+      updateAutoButtonHighlight();
+    }
+
+    // ★媒体ビューの表示セットを“今の状態”に同期（ボタン操作後の地図更新用）
+    function syncMediaViewSetIfNeeded(){
+      if (viewMode !== "media") return;
+
+      // 表示中の媒体が除外されていたら、最初の対象媒体に切り替える。無ければ基準ビューへ戻す。
+      const isCurrentOk = () => {
+        if (!currentMediaName) return false;
+        if (!isMediaEnabled(currentMediaName)) return false;
+        const p = getSliderParamsForMedia(currentMediaName);
+        return !!(p && p.show);
+      };
+
+      if (!isCurrentOk()) {
+        let found = null;
+        for (const m0 of getAllMediaNames()){
+          const m = String(m0);
+          if (!isMediaEnabled(m)) continue;
+          const p = getSliderParamsForMedia(m);
+          if (p && p.show) { found = m; break; }
+        }
+        if (!found) {
+          viewMode = "base";
+          currentMediaName = null;
+          mediaViewSet = new Set();
+          return;
+        }
+        currentMediaName = found;
+
+        // attrMetrics 側のビューラジオもできるだけ同期（存在しなくてもOK）
+        document.querySelectorAll("#attrMetrics .attr-view-check").forEach(cb => {
+          const kind = cb.dataset.scopeKind || "";
+          const mn = cb.dataset.mediaName || "";
+          if (kind === "media") cb.checked = (mn === found);
+        });
+      }
+
+      try {
+        recomputeMediaDisplaySet(currentMediaName);
+      } catch(e) {}
+      mediaViewSet = new Set(getMediaDisplaySet(currentMediaName));
     }
 
 
-    // ローディングUI
-    const overlay = $("overlay"), overlayTitle = $("overlayTitle"), overlayMsg = $("overlayMsg"), overlayBar = $("overlayBar"), overlaySub = $("overlaySub");
-    function showOverlay(title, msg){ overlay.style.display="flex"; overlayTitle.textContent = title||""; overlayMsg.textContent = msg||""; }
-    function hideOverlay(){ overlay.style.display="none"; }
-    function setProgress(p, sub=""){ overlayBar.style.width = `${Math.max(0, Math.min(100, p))}%`; overlaySub.textContent = sub; }
+    // ローディングUI（起動時クルクルを「更新中…」にも流用）
+const overlay = $("overlay"),
+      overlayTitle = $("overlayTitle"),
+      overlayMsg = $("overlayMsg"),
+      overlayBar = $("overlayBar"),
+      overlaySub = $("overlaySub"),
+      overlayProgress = overlay?.querySelector(".progress");
+
+function showOverlay(title, msg){
+  // init mode（進捗バーあり）
+  overlay.dataset.mode = "init";
+  if (overlayProgress) overlayProgress.style.display = "block";
+  overlay.style.display = "flex";
+  overlayTitle.textContent = title || "";
+  overlayMsg.textContent   = msg || "";
+}
+function hideOverlay(){ overlay.style.display="none"; overlay.dataset.mode = ""; }
+function setProgress(p, sub=""){
+  overlayBar.style.width = `${Math.max(0, Math.min(100, p))}%`;
+  overlaySub.textContent = sub;
+}
+
+// ★更新時（ゲージ操作/ビュー切替）用：起動時と同じクルクルを流用（進捗バーは非表示）
+let __overlayBusyTokenSeq = 0;
+let __overlayBusyCurrentToken = 0;
+function showOverlayBusy(msg="更新中…"){
+  // まだ初期計算中（overlay が init 表示中）のときは邪魔しない
+  if (overlay.style.display === "flex" && overlay.dataset.mode === "init") {
+    return 0;
+  }
+  __overlayBusyCurrentToken = ++__overlayBusyTokenSeq;
+  overlay.dataset.mode = "busy";
+  if (overlayProgress) overlayProgress.style.display = "none";
+  overlayBar.style.width = "0%";
+  overlaySub.textContent = "";
+  overlayTitle.textContent = "更新中…";
+  overlayMsg.textContent   = msg;
+  overlay.style.display = "flex";
+  return __overlayBusyCurrentToken;
+}
+function hideOverlayBusy(token){
+  // token==0 は「初期計算中なので表示しなかった」等
+  if (!token) return;
+  if (token !== __overlayBusyCurrentToken) return;
+  overlay.style.display = "none";
+  overlay.dataset.mode  = "";
+}
     if (ENABLE_PRECOMPUTE) {
       showOverlay("初期計算を準備中…", "CSVと地図の読み込みを待機中");
     } else {
@@ -1803,6 +2906,7 @@
       box.querySelectorAll(".attr-checkbox").forEach(chk => {
         chk.addEventListener("change", () => {
           updateAutoButtonHighlight();
+
           updateAttrMetrics();
           updateAttrSummaryLabel();
         });
@@ -1823,11 +2927,15 @@
         mediaIndex = new Map();
         storeToCodes = new Map();
         mediaCodesAllByName = new Map();   // ★ 全域の媒体 → 町コード
+        mediaAreaToCodesAllByName = new Map(); // ★ 全域の媒体 → エリアコード → 町コード
 
         for (const r of rows) {
           const code  = String(r[CODE_KEY]);
-          const store = r[STORE_KEY] != null ? String(r[STORE_KEY]) : "";
-          const name  = r["媒体名"] ?? "(名称不明)";
+          const store = getStoreCdFromRow(r);
+          const name  = normMediaName(r["媒体名"]); r["媒体名"] = name;
+
+          const cat0 = String(r["分類"] ?? "").trim();
+          if (cat0 && !mediaCategoryByName.has(name)) mediaCategoryByName.set(name, cat0);
 
           // 町別 → 媒体行
           if (!mediaIndex.has(code)) mediaIndex.set(code, []);
@@ -1842,12 +2950,25 @@
           // 媒体名 → 町集合（全域）
           if (!mediaCodesAllByName.has(name)) mediaCodesAllByName.set(name, new Set());
           mediaCodesAllByName.get(name).add(code);
+
+          // ★追加：媒体名 → エリアコード → 町集合（全域）
+          const areaCode = getMediaAreaCodeFromRow(r, code);
+          if (!mediaAreaToCodesAllByName.has(name)) mediaAreaToCodesAllByName.set(name, new Map());
+          const areaMap = mediaAreaToCodesAllByName.get(name);
+          if (!areaMap.has(areaCode)) areaMap.set(areaCode, new Set());
+          areaMap.get(areaCode).add(code);
         }
 
         // ★ ここから追加：媒体ごとの ON/OFF を初期化（全部 対象=true）
         mediaEnabledByName = new Map();
         for (const name of mediaCodesAllByName.keys()) {
           mediaEnabledByName.set(name, true);
+        }
+
+        // ★追加：媒体ごとの倍率も初期化（全部 100%）
+        mediaScaleByName = new Map();
+        for (const name of mediaCodesAllByName.keys()) {
+          mediaScaleByName.set(name, 1);
         }
 
         const prev = $("summary").innerHTML;
@@ -1859,42 +2980,392 @@
       error: (err) => { /* ここは既存のまま */ }
     });
 
-    // ★ 業態マスタ読み込み
-    Papa.parse(CSV_TYPE, {
-      header: true,
-      download: true,
-      dynamicTyping: true,
-      encoding: "utf-8",
-      complete: (res) => {
-        // 行を保持
-        typeMasterRows = res.data.filter(r => r && r["業態"]);
+    // ★ 業態マスタ読み込み（type_master_all.csv：媒体組み合わせ別対応）
+    function normalizeTypeCategory(s){
+      const t = String(s ?? "").trim();
+      if (!t) return "";
+      const lower = t.toLowerCase();
+      if (t === "FP" || t === "ＦＰ" || t.includes("フリペ")) return "フリーペーパー";
+      if (t === "ポス" || t.includes("ポスティ")) return "ポスティング";
+      if (t === "WEB" || t === "Web" || t === "ウェブ" || lower === "web") return "web";
+      if (t.includes("折込")) return "折込";
+      return t;
+    }
+    function normalizeInsideLabel(v){
+      const s = String(v ?? "").trim();
+      if (!s) return "";
+      if (s.includes("市内")) return "名古屋市内";
+      if (s.includes("市外")) return "名古屋市外";
+      return s;
+    }
 
-        // 業態ごとにグルーピング
+    function splitMediaList(str){
+      return String(str ?? "")
+        .split(/[,\u3001]/)
+        .map(s => normalizeTypeCategory(String(s).trim()))
+        .filter(s => s !== "");
+    }
+    function makeComboKeyFromArray(arr){
+      return Array.from(arr)
+        .map(s => normalizeTypeCategory(String(s).trim()))
+        .filter(Boolean)
+        .sort((a,b)=>a.localeCompare(b,"ja"))
+        .join("|");
+    }
+    function makeComboKeyFromList(listStr){
+      return makeComboKeyFromArray(splitMediaList(listStr));
+    }
+
+    function getUsedMediaCategories(){
+      const cats = new Set();
+      if (!mediaCodesAllByName || !mediaCodesAllByName.size) return cats;
+      for (const name of mediaCodesAllByName.keys()){
+        if (!isMediaEnabled(name)) continue;
+        const dispSet = getMediaDisplaySet(name);
+        if (!dispSet || dispSet.size === 0) continue;
+        const cat0 = mediaCategoryByName.get(name);
+        const cat = normalizeTypeCategory(cat0);
+        if (cat) cats.add(cat);
+      }
+      return cats;
+    }
+
+    function getTypeContrib(r){
+      const v = (r && (r["貢献度"] ?? r["重み付き貢献度"] ?? r["重み付け貢献度"])) ?? 0;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+    function getTypeShap(r){
+      const v = (r && (r["SHAP"] ?? r["Shapley準拠_接触者平均"])) ?? 0;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function pickTypeRowsForCurrentCombo(gyotai){
+      const gy = String(gyotai || "");
+      const comboMap = typeMasterByGyotaiCombo.get(gy);
+      const allRows = typeMasterByGyotai.get(gy) || [];
+      if (!comboMap || comboMap.size === 0) {
+        return { rows: allRows, comboKey: null, match: "gyotai-only" };
+      }
+
+      const usedCats = Array.from(getUsedMediaCategories());
+      const usedKey  = makeComboKeyFromArray(usedCats);
+
+      const desiredInside = getCenterInsideLabel(); // "名古屋市内" / "名古屋市外" / ""
+      const keyFull = (desiredInside ? (desiredInside + "||" + usedKey) : ("||" + usedKey));
+
+      if (comboMap.has(keyFull)) {
+        const g = comboMap.get(keyFull);
+        return { rows: g.rows, comboKey: keyFull, match: "exact", meta: g.meta };
+      }
+
+      const desiredHas = !!desiredInside;
+      const candidates = [];
+      for (const g of comboMap.values()){
+        const ins = normalizeInsideLabel(g?.meta?.inside ?? "");
+        if (desiredHas && ins && ins !== desiredInside) continue;
+        candidates.push(g);
+      }
+      const pool = candidates.length ? candidates : Array.from(comboMap.values());
+
+      // best subset fallback（使っている媒体の部分集合で、最大媒体数のもの）
+      const usedSet = new Set(usedCats.map(normalizeTypeCategory));
+      let best = null;
+      let bestSize = -1;
+      for (const g of pool){
+        const s = new Set((g.cats || []).map(normalizeTypeCategory));
+        let ok = true;
+        for (const c of s){
+          if (!usedSet.has(c)) { ok = false; break; }
+        }
+        if (!ok) continue;
+        if (s.size > bestSize){
+          best = g; bestSize = s.size;
+        }
+      }
+      if (best) {
+        return { rows: best.rows, comboKey: best.key, match: "subset", meta: best.meta };
+      }
+
+      // fallback: pick the closest (Jaccard)
+      let best2 = null;
+      let bestScore = -1;
+      for (const g of pool){
+        const s = new Set((g.cats || []).map(normalizeTypeCategory));
+        let inter = 0;
+        for (const c of s) if (usedSet.has(c)) inter++;
+        const union = new Set([...s, ...usedSet]).size || 1;
+        const score = inter / union;
+        if (score > bestScore){
+          bestScore = score; best2 = g;
+        }
+      }
+      if (best2) return { rows: best2.rows, comboKey: best2.key, match: "closest", meta: best2.meta };
+
+      return { rows: allRows, comboKey: null, match: "gyotai-only" };
+    }
+
+    // ===== 「最適組み合わせに絞る」用：任意 combo グループの業態指標を計算 =====
+    // 既存 computeGyotaiMetrics と同じ考え方で、rows(=type_master_all の媒体行) から cap を作り、
+    // 現在の選択町（媒体ビュー union ∩ 基準選択町）に対して推測視認率/来店期待値を算出する。
+    function computeGyotaiMetricsForComboGroup(group){
+      if (!group || !group.rows || !group.rows.length) {
+        return { viewRate: null, visitRaw: null };
+      }
+      if (!mediaIndex || !townIndex) {
+        return { viewRate: null, visitRaw: null };
+      }
+
+      const rows = group.rows;
+      const baseStr = baseCode ? String(baseCode) : null;
+
+      // この組み合わせの媒体カテゴリ集合（type_master_all の「媒体」列）
+      const categories = new Set(
+        rows
+          .map(r => normalizeTypeCategory(String(r["媒体"] ?? "").trim()))
+          .filter(Boolean)
+      );
+      if (!categories.size) return { viewRate: null, visitRaw: null };
+
+      // cap を準備（貢献度の絶対値を 0.3〜1.0 にマップ）
+      let maxAbsContrib = 0;
+      for (const r of rows) {
+        const contrib = getTypeContrib(r);
+        if (!Number.isFinite(contrib)) continue;
+        const abs = Math.abs(contrib);
+        if (abs > maxAbsContrib) maxAbsContrib = abs;
+      }
+      const denom = maxAbsContrib || 1;
+
+      const mediaCap = new Map();
+      for (const r of rows) {
+        const cat = normalizeTypeCategory(String(r["媒体"] ?? "").trim());
+        if (!cat) continue;
+        const contrib = getTypeContrib(r);
+        const abs = Math.max(0, Math.abs(contrib));
+        const normalized = abs / denom;          // 0〜1
+        const cap = 0.3 + 0.7 * normalized;      // 0.3〜1.0
+        const prev = mediaCap.get(cat);
+        mediaCap.set(cat, prev != null ? Math.max(prev, cap) : cap);
+      }
+
+      // ① 媒体ビュー union（ただし、この組み合わせの媒体カテゴリだけ）
+      const allMediaSelected = new Set();
+      if (mediaViewByName && typeof mediaViewByName.entries === "function") {
+        for (const [mediaName, set] of mediaViewByName.entries()) {
+          if (!set || !set.size) continue;
+          if (!isMediaEnabled(mediaName)) continue;
+          const cat0 = normalizeTypeCategory(mediaCategoryByName.get(mediaName) || "");
+          if (!categories.has(cat0)) continue;
+          for (const c of set) allMediaSelected.add(String(c));
+        }
+      }
+
+      // ② union ∩ 基準選択町（※基準町除外）
+      let targetCodes = [];
+      if (allMediaSelected.size) {
+        for (const c of allMediaSelected) {
+          const s = String(c);
+          if (baseStr && s === baseStr) continue;
+          if (!selected.has(s)) continue;
+          targetCodes.push(s);
+        }
+      }
+      if (!targetCodes.length) {
+        targetCodes = Array.from(selected).filter(code => {
+          const s = String(code);
+          return !baseStr || s !== baseStr;
+        });
+      }
+      if (!targetCodes.length) return { viewRate: null, visitRaw: null };
+
+      const center =
+        lastClickLngLat ||
+        centroidOf(baseCode || "") ||
+        getMapCenterLngLat();
+
+      let hhSum = 0;
+      let seenSum = 0;
+      let visitRaw = 0;
+
+      for (const code of targetCodes) {
+        const codeStr = String(code);
+        const townRow = townIndex.get(codeStr);
+        if (!townRow) continue;
+        const hh = toNumber(townRow[HH_TOTAL_KEY] ?? 0);
+        if (!hh) continue;
+
+        const mediaRows = mediaIndex.get(codeStr);
+        if (!mediaRows) continue;
+
+        let notSeenProd = 1;
+        let hasAny = false;
+
+        for (const r of mediaRows) {
+          const cat = normalizeTypeCategory(String(r["分類"] ?? "").trim());
+          if (!categories.has(cat)) continue;
+          const mediaName = r["媒体名"] ?? "(名称不明)";
+          if (!isMediaEnabled(mediaName)) continue;
+          if (!isRowInMediaDisplay(mediaName, codeStr, r)) continue;
+
+          const copies = toNumber(r["部数"]);
+          if (!copies) continue;
+
+          const cap = mediaCap.get(cat) ?? 0.6;
+          const baseCov = Math.min(1, copies / hh);
+          let cov = baseCov * cap;
+          if (cov <= 0) continue;
+          if (cov > 1) cov = 1;
+
+          hasAny = true;
+          notSeenProd *= (1 - cov);
+        }
+
+        if (!hasAny) continue;
+        const coverageTown = 1 - notSeenProd;
+        hhSum += hh;
+        seenSum += hh * coverageTown;
+
+        const p = PRE.get(codeStr);
+        const centroid = p?.centroid || centroidOf(codeStr);
+        if (centroid && center) {
+          const dKm = distMeters(center, centroid) / 1000;
+          const decay = 1 / (1 + dKm);
+          visitRaw += hh * coverageTown * decay;
+        }
+      }
+
+      const viewRate = hhSum > 0 ? (seenSum / hhSum) : null;
+      return { viewRate, visitRaw: visitRaw || null };
+    }
+
+    function pickBestComboGroupForCurrentUsage(gyotai){
+  const gy = String(gyotai || "");
+  const comboMap = typeMasterByGyotaiCombo.get(gy);
+  if (!comboMap || !comboMap.size) return null;
+
+  // 現在「使用中」とみなす媒体カテゴリ（ON かつ表示セットが1件以上ある媒体）
+  const usedCats = Array.from(getUsedMediaCategories()).map(normalizeTypeCategory).filter(Boolean);
+  const usedSet  = new Set(usedCats);
+  if (!usedSet.size) return null;
+
+  const desiredInside = getCenterInsideLabel();
+
+  const candidates = [];
+  for (const g of comboMap.values()) {
+    const ins = normalizeInsideLabel(g?.meta?.inside ?? "");
+    if (desiredInside && ins && ins !== desiredInside) continue;
+
+    const cats = (g.cats || []).map(normalizeTypeCategory).filter(Boolean);
+    if (!cats.length) continue;
+
+    // 「今使ってる媒体カテゴリ」の部分集合のみを候補（未使用カテゴリを含む組み合わせは除外）
+    let ok = true;
+    for (const c of cats) { if (!usedSet.has(c)) { ok = false; break; } }
+    if (!ok) continue;
+
+    candidates.push(g);
+  }
+  if (!candidates.length) return null;
+
+  // ★評価は CSV の「重み付き貢献度」合計で行う（ここが reach 的な単調増加だと“全媒体が常に最適”になりがち）
+  let best = null;
+  let bestTotal = -Infinity;
+  let bestPos   = -Infinity;
+  let bestSize  = Infinity; // 同点なら少ない媒体数を優先（運用しやすい）
+  for (const g of candidates) {
+    const rows = g.rows || [];
+    let total = 0;
+    let pos = 0;
+    for (const r of rows) {
+      const w = toNumber(r["重み付き貢献度"]);
+      if (!Number.isFinite(w)) continue;
+      total += w;
+      if (w > 0) pos += w;
+    }
+    const sz = (g.cats || []).length;
+
+    if (
+      (total > bestTotal) ||
+      (total === bestTotal && pos > bestPos) ||
+      (total === bestTotal && pos === bestPos && sz < bestSize)
+    ) {
+      best = g;
+      bestTotal = total;
+      bestPos = pos;
+      bestSize = sz;
+      best._csvScore = { totalWeighted: total, positiveWeighted: pos };
+    }
+  }
+  return best;
+}
+
+    async function loadTypeMaster(){
+      try{
+        const resp = await fetch(CSV_TYPE, {cache:"no-store"});
+        const buf = await resp.arrayBuffer();
+        let csvText = "";
+        try { csvText = new TextDecoder("shift-jis").decode(buf); }
+        catch (e) { csvText = new TextDecoder("utf-8").decode(buf); }
+
+        const parsed = Papa.parse(csvText, {header:true, dynamicTyping:true, skipEmptyLines:true});
+        const rows = (parsed.data || []).filter(r => r && r["業態"]);
+
+        typeMasterRows = rows;
+
+        // gyotai / combo で索引化
         typeMasterByGyotai.clear();
-        for (const r of typeMasterRows) {
+        typeMasterByGyotaiCombo.clear();
+
+        for (const r of rows) {
           const g = String(r["業態"]);
           if (!typeMasterByGyotai.has(g)) typeMasterByGyotai.set(g, []);
           typeMasterByGyotai.get(g).push(r);
+
+          const listStr = String(r["採用媒体一覧"] ?? "").trim();
+          const comboKey = makeComboKeyFromList(listStr);
+          const inside = normalizeInsideLabel(r["市内外"] ?? "");
+          const key = (inside ? (inside + "||" + comboKey) : ("||" + comboKey));
+
+          if (!typeMasterByGyotaiCombo.has(g)) typeMasterByGyotaiCombo.set(g, new Map());
+          const m = typeMasterByGyotaiCombo.get(g);
+
+          if (!m.has(key)) {
+            m.set(key, {
+              key,
+              cats: splitMediaList(listStr),
+              meta: {
+                listStr,
+                comboId: r["組み合わせID"] ?? "",
+                comboName: r["組み合わせ名"] ?? "",
+                file: r["ファイル名"] ?? "",
+                inside: inside
+              },
+              rows: []
+            });
+          }
+          m.get(key).rows.push(r);
         }
 
         // コンボボックスへ業態一覧を流し込む
         const sel = $("typeSelect");
         if (sel) {
-          const gyotaiList = Array.from(typeMasterByGyotai.keys()).sort();
-          for (const g of gyotaiList) {
-            const opt = document.createElement("option");
-            opt.value = g;
-            opt.textContent = g;
-            sel.appendChild(opt);
-          }
+          const gyotaiList = Array.from(typeMasterByGyotai.keys())
+            .sort((a,b)=>a.localeCompare(b,"ja"));
+          sel.innerHTML =
+            `<option value="">業態を選択...</option>` +
+            gyotaiList.map(g => `<option value="${escHtml(g)}">${escHtml(g)}</option>`).join("");
         }
-      },
-      error: (err) => {
+
+        renderTypeMetrics();
+      } catch (err) {
         console.error("CSV_TYPE 読み込みエラー", err);
         const box = $("typeList");
         if (box) box.textContent = "業態マスタの読み込みに失敗しました。";
       }
-    });
+    }
+    loadTypeMaster();
 
 
     map.on("load", async () => {
@@ -2045,18 +3516,31 @@
 
             // 通常の町境界線はズームするまで薄く/非表示、基準・選択・路線強調は常に見せる
             "line-opacity": [
-              "case",
-                ["any",
-                  ["boolean", ["feature-state", "base"], false],
-                  ["boolean", ["feature-state", "selected"], false],
-                  ["boolean", ["feature-state", "onLine"], false]
-                ],
-                1,
-                ["interpolate", ["linear"], ["zoom"],
-                  0, 0,
-                  10.8, 0,
-                  11.2, 0.7
-                ]
+              "interpolate", ["linear"], ["zoom"],
+                0, ["case",
+                      ["any",
+                        ["boolean", ["feature-state", "base"], false],
+                        ["boolean", ["feature-state", "selected"], false],
+                        ["boolean", ["feature-state", "onLine"], false]
+                      ],
+                      1, 0
+                   ],
+                10.8, ["case",
+                      ["any",
+                        ["boolean", ["feature-state", "base"], false],
+                        ["boolean", ["feature-state", "selected"], false],
+                        ["boolean", ["feature-state", "onLine"], false]
+                      ],
+                      1, 0
+                   ],
+                11.2, ["case",
+                      ["any",
+                        ["boolean", ["feature-state", "base"], false],
+                        ["boolean", ["feature-state", "selected"], false],
+                        ["boolean", ["feature-state", "onLine"], false]
+                      ],
+                      1, 0.7
+                   ]
             ]
           }
         });
@@ -2099,13 +3583,16 @@
               // 解除時はとりあえず何もしない（媒体側は自動では消さない）
               selected.delete(code);
               map.setFeatureState({ source: "aichi", id: code }, { selected: false });
+              refreshMediaDisplaysForTown(code);
             } else {
               // ★ 新たに基準町を追加
               selected.add(code);
+              rememberTownAddedToBase(code);
               map.setFeatureState({ source: "aichi", id: code }, { selected: true });
 
               // ★ 追加された町を起点に、媒体ごとの「店cd展開セット」を更新
               autoExpandMediaFromBaseTown(code);
+              refreshMediaDisplaysForTown(code);
             }
 
             // 基準点は動かさない
@@ -2142,7 +3629,7 @@
           const stores = [...new Set(
             rowsForTown
               .filter(r => (r["媒体名"] ?? "(名称不明)") === currentMediaName)
-              .map(r => r[STORE_KEY])
+              .map(r => getStoreCdFromRow(r))
               .filter(v => v != null && v !== "")
               .map(v => String(v))
           )];
@@ -2166,7 +3653,7 @@
 
             // 店cd & 媒体名が一致する行があれば対象
             const hit = rows.some(r =>
-              String(r[STORE_KEY] ?? "") === store &&
+              String(getStoreCdFromRow(r) ?? "") === store &&
               (r["媒体名"] ?? "(名称不明)") === currentMediaName
             );
             if (hit) targetCodes.push(cStr);
@@ -2198,6 +3685,11 @@
 
           // 店cdごとの色も更新
           updateStoreColorsForCurrentMedia();
+
+          // ★ スライダー倍率に応じた表示範囲に整形（表示セットを優先）
+          recomputeMediaDisplaySet(currentMediaName);
+          mediaViewSet = new Set(getMediaDisplaySet(currentMediaName));
+          applyViewSelection();
 
           // 基準ビューには触らない
           updateAggregates();
@@ -2236,6 +3728,10 @@
           selected.clear();
           mediaViewSet.clear();
           mediaViewByName.clear();
+          baseSelectOrder.length = 0;
+          mediaAreaOrderByName.clear();
+          mediaDisplayByName.clear();
+          mediaDisplayAreasByName.clear();
           viewMode = "base";
           currentMediaName = null;
           resetFrontierCaches();
@@ -2245,6 +3741,8 @@
 
           // 目標入力強調もリセット
           updateAutoButtonHighlight();
+          // ★最適ボタン強調も「全て解除」でリセット
+          clearOptimizeButtonEmph();
 
         } else if (t.id === "zoomSelBtn") {
           ev.preventDefault();
@@ -2341,6 +3839,14 @@
       for (const r of rowsForTown) {
         const mName = r["媒体名"] ?? "(名称不明)";
         if (!isMediaEnabled(mName)) continue;  // 対象ONのみ
+
+        // 媒体ビューで明示セットがある場合（空でも）それを優先
+        const explicit = mediaViewByName?.get(mName);
+        if (explicit !== undefined && explicit !== null && !explicit.has(key)) continue;
+
+        // ★ 店CD（=エリア）単位のスライダー選択を反映
+        if (!isRowInMediaDisplay(mName, key, r)) continue;
+
         yen += toNumber(r["料金"]);
         cps += toNumber(r["部数"]);
       }
@@ -2354,35 +3860,23 @@
       let yen = 0;
       let cps = 0;
 
-      // 媒体ごとに、「この媒体で配布している町の集合」を決めて集計
-      for (const [name, allCodesForMedia] of mediaCodesAllByName.entries()) {
-        // OFF の媒体は完全に無視
+      // 媒体ごとに「スライダー反映後（店CD/エリア単位）」の表示セットで集計
+      for (const [name] of mediaCodesAllByName.entries()) {
         if (!isMediaEnabled(name)) continue;
 
-        const explicitSet = mediaViewByName.get(name);
-        let codesForSum;
+        const dispSet = getMediaDisplaySet(name);
+        const areaSet = getMediaDisplayAreaSet(name);
+        if (!dispSet || !dispSet.size || !areaSet || !areaSet.size) continue;
 
-        if (explicitSet && explicitSet.size > 0) {
-          // 媒体ビューで明示的に選択されている町
-          codesForSum = explicitSet;
-        } else {
-          // まだ媒体ビューで選択が無い → 基準ビューで選択されている町だけ
-          codesForSum = new Set();
-          for (const code of selected) {
-            if (allCodesForMedia.has(String(code))) {
-              codesForSum.add(String(code));
-            }
-          }
-        }
-
-        if (!codesForSum.size) continue;
-
-        for (const code of codesForSum) {
-          const rowsForTown = mediaIndex.get(String(code));
+        for (const code0 of dispSet) {
+          const code = String(code0);
+          const rowsForTown = mediaIndex.get(code);
           if (!rowsForTown) continue;
           for (const r of rowsForTown) {
             const mName = r["媒体名"] ?? "(名称不明)";
-            if (mName !== name) continue;   // この媒体の行だけ集計
+            if (String(mName) !== String(name)) continue;
+            const a = getMediaAreaCodeFromRow(r, code);
+            if (!areaSet.has(String(a))) continue;
             yen += toNumber(r["料金"]);
             cps += toNumber(r["部数"]);
           }
@@ -2652,7 +4146,7 @@
         return { viewRate: null, visitRaw: null };
       }
 
-      const rows = typeMasterByGyotai.get(gyotai) || [];
+      const rows = (pickTypeRowsForCurrentCombo(gyotai).rows || []);
       if (!rows.length) {
         return { viewRate: null, visitRaw: null };
       }
@@ -2695,10 +4189,10 @@
       // --- この業態に紐づく「媒体カテゴリ」一覧（type_master.媒体） ---
       const categories = new Set(
         rows
-          .map(r => String(r["媒体"] ?? "").trim())
+          .map(r => normalizeTypeCategory(String(r["媒体"] ?? "").trim()))
           .filter(s => s !== "")
       );
-      if (!categories.size) {
+if (!categories.size) {
         return { viewRate: null, visitRaw: null };
       }
 
@@ -2707,7 +4201,7 @@
       let maxAbsContrib = 0;
 
       for (const r of rows) {
-        const contrib = Number(r["貢献度"] ?? 0);
+        const contrib = getTypeContrib(r);
         if (Number.isFinite(contrib)) {
           const abs = Math.abs(contrib);
           if (abs > maxAbsContrib) maxAbsContrib = abs;
@@ -2716,10 +4210,10 @@
       const denom = maxAbsContrib || 1;
 
       for (const r of rows) {
-        const cat = String(r["媒体"] ?? "").trim();
+        const cat = normalizeTypeCategory(String(r["媒体"] ?? "").trim());
         if (!cat) continue;
 
-        const contrib = Number(r["貢献度"] ?? 0);
+        const contrib = getTypeContrib(r);
         const abs = Math.max(0, Math.abs(contrib));
         const normalized = abs / denom;          // 0〜1
         const cap = 0.3 + 0.7 * normalized;      // 0.3〜1.0 にマッピング
@@ -2742,7 +4236,7 @@
       for (const code of targetCodes) {
         const codeStr = String(code);
         const townRow = townIndex.get(codeStr);
-        if (!townRow) continue;
+        if (!townRow) continue; 
 
         const hh = toNumber(townRow[HH_TOTAL_KEY] ?? 0);
         if (!hh) continue;
@@ -2754,11 +4248,13 @@
         let hasAny = false;   // この町で業態に紐づく有効媒体が1つでもあるか
 
         for (const r of mediaRows) {
-          const cat = String(r["分類"] ?? "").trim();
+          const cat = normalizeTypeCategory(String(r["分類"] ?? "").trim());
           if (!categories.has(cat)) continue; // 業態に紐づかない媒体は無視
 
           const mediaName = r["媒体名"] ?? "(名称不明)";
           if (!isMediaEnabled(mediaName)) continue;  // 除外中媒体は無視
+          // 表示セット（店CD単位の増減）を反映（行単位で判定）
+          if (!isRowInMediaDisplay(mediaName, codeStr, r)) continue;
 
           const copies = toNumber(r["部数"]);
           if (!copies) continue;
@@ -2800,8 +4296,75 @@
       };
     }
 
+    // ★ 自動選択開始時はクリーンスタート（全解除 + スライダー履歴クリア + 100%）
+    function resetSelectionsForAutoStart(){
+      // 可能な限り「地図上で selected になっている町」を全部 OFF にする
+      const allCodes = new Set();
+      try {
+        for (const c of selected) allCodes.add(String(c));
+        for (const c of mediaViewSet) allCodes.add(String(c));
+        if (mediaViewByName && typeof mediaViewByName.values === 'function') {
+          for (const s of mediaViewByName.values()) {
+            if (!s) continue;
+            for (const c of s) allCodes.add(String(c));
+          }
+        }
+        if (mediaDisplayByName && typeof mediaDisplayByName.values === 'function') {
+          for (const s of mediaDisplayByName.values()) {
+            if (!s) continue;
+            for (const c of s) allCodes.add(String(c));
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      try {
+        if (map && typeof map.setFeatureState === 'function') {
+          for (const code of allCodes) {
+            // storeIdx は媒体ビューで使うので念のため 0 に戻す
+            map.setFeatureState({ source: 'aichi', id: code }, { selected: false, storeIdx: 0 });
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      // 内部状態のクリア
+      try { selected.clear(); } catch(e) {}
+      try { mediaViewSet.clear(); } catch(e) {}
+      try { mediaViewByName.clear(); } catch(e) {}
+      try { baseSelectOrder.length = 0; } catch(e) {}
+      try { mediaAreaOrderByName.clear(); } catch(e) {}
+      try { mediaDisplayByName.clear(); } catch(e) {}
+      try { mediaDisplayAreasByName.clear(); } catch(e) {}
+
+      // ★目標ロックも解除してクリーンスタート
+      try { clearGoalLock(); } catch(e) {}
+
+      viewMode = 'base';
+      currentMediaName = null;
+
+      // 部数調整スライダーは最大(=100%)に戻す
+      try {
+        if (mediaScaleByName) {
+          for (const name of mediaScaleByName.keys()) mediaScaleByName.set(name, 1);
+        }
+      } catch (e) { /* ignore */ }
+      document.querySelectorAll('input.media-scale').forEach(inp => {
+        if (inp instanceof HTMLInputElement) inp.value = '100';
+      });
+      document.querySelectorAll('.media-scale-val').forEach(sp => { sp.textContent = '100%'; });
+
+      resetFrontierCaches();
+
+      // UIも更新
+      applyViewSelection();
+      updateAggregates();
+      updateViewStatus();
+      updateAttrMetrics();
+      updateAutoButtonHighlight();
+    }
+
     // 距離優先（基準セット selected を対象）
     async function runDistanceFirst(){
+      resetSelectionsForAutoStart();
       const targetYen    = Math.round(toNumber($("budgetInput").value) * 10000);
       const targetCopies = Math.round(toNumber($("copiesInput").value) * 10000);
       const targetDist   = Math.round(toNumber($("distInput").value)   * 1000);
@@ -2876,6 +4439,8 @@
 
         let stoppedBy = null;
         let step = 0;
+        const AUTO_UI_INTERVAL_MS = 2000;
+        let lastUiUpdate = performance.now();
 
         for (const r of ranked) {
           if (STOP.requested) { 
@@ -2886,8 +4451,10 @@
           // まず選択に追加する
           const codeStr = String(r.code);
           selected.add(codeStr);
+          rememberTownAddedToBase(codeStr);
           map.setFeatureState({ source: "aichi", id: codeStr }, { selected: true });
           autoExpandMediaFromBaseTown(codeStr);
+          refreshMediaDisplaysForTown(codeStr);
 
           // ★ 追加後の「全媒体対象（対象ONのみ）」を再計算
           ({ yen: totalYen, cps: totalCps } = getCurrentAllMediaTotals());
@@ -2903,9 +4470,12 @@
             break;
           }
 
-          if ((++step % 20) === 0) {
+          step++;
+          if ((performance.now() - lastUiUpdate) >= AUTO_UI_INTERVAL_MS) {
             updateAggregates();
-            await sleep(0);
+            updateAttrMetrics();
+            await sleep(0); // 描画に譲る
+            lastUiUpdate = performance.now();
           }
         }
 
@@ -2922,6 +4492,15 @@
         $("copiesInput")?.classList.toggle("hit", copiesHit);
         $("distInput")?.classList.toggle("hit", distHit);
 
+        // ★ 料金/部数の目標に到達していれば、ロックモードへ（他媒体で補填/均等調整）
+        // 両方設定時も「片方到達」でロックを開始し、到達した側を基準にする
+        const goalHitAny = ((targetYen > 0 && totalYen >= targetYen) || (targetCopies > 0 && totalCps >= targetCopies));
+        if (goalHitAny) {
+          buildGoalLockFromCurrentSelection(targetYen, targetCopies, stoppedBy);
+          updateAggregates();
+          updateAttrMetrics();
+        }
+
         const parts = [];
         parts.push(`町数 ${picked}件`);
         if (targetYen > 0)    parts.push(`<span class="${yenHit ? 'hitText' : ''}">料金 ${totalYen10k.toLocaleString()} / 目標 ${(targetYen/10000|0).toLocaleString()} 万円</span>`);
@@ -2930,6 +4509,8 @@
         $out.innerHTML = `自動選択（距離優先）: ${parts.join(" | ")}${stoppedBy ? ` / 停止理由: ${stoppedBy}` : ""}`;
       } finally {
         finishAuto();
+        // ★自動選択後、最適化ボタンを目立たせる
+        emphasizeOptimizeButtons();
       }
     }
 
@@ -3024,34 +4605,20 @@
       const allMediaNames = Array.from(mediaNamesInSelection)
         .sort((a, b) => a.localeCompare(b, "ja"));
 
-      // ▼ 「全媒体対象」用：基準ONの各媒体の「全選択町」のユニオンを作る
+      // ▼ 「全媒体対象」用：対象ONの各媒体について
+      //    スライダー（店CD単位の増減）を反映した「表示セット」のユニオンを作る
       const allMediaTargetSet = new Set();
       let allMediaTargetCopies = 0;
-
+      let allMediaTargetPrice  = 0;
       if (mediaIndex && mediaCodesAllByName) {
-        for (const [name, allCodesForMedia] of mediaCodesAllByName.entries()) {
+        for (const [name] of mediaCodesAllByName.entries()) {
           // OFF の媒体は対象外
           if (!isMediaEnabled(name)) continue;
 
-          const explicitSet = mediaViewByName.get(name);
-          let codesForSum;
+          const dispSet = getMediaDisplaySet(name);
+          if (!dispSet || !dispSet.size) continue;
 
-          if (explicitSet) {
-            // 媒体ビューで明示的に選択された町
-            codesForSum = explicitSet;
-          } else if (selected.size > 0) {
-            // まだ媒体ごとの選択が無い場合は、基準ビューで選択されている町だけ
-            codesForSum = new Set(
-              [...allCodesForMedia].map(String).filter(c => selected.has(c))
-            );
-          } else {
-            // 何も選択されていない場合は、その媒体が出ている全域f
-            codesForSum = new Set([...allCodesForMedia].map(String));
-          }
-
-          // この媒体で「対象」となっている町をユニオンに追加しつつ、
-          // その媒体分の部数だけを合計する
-          for (const code of codesForSum) {
+          for (const code of dispSet) {
             const cStr = String(code);
             allMediaTargetSet.add(cStr);
 
@@ -3059,7 +4626,10 @@
             for (const r of rowsForTown) {
               const rName = r["媒体名"] ?? "(名称不明)";
               if (rName !== name) continue;
+              // ★ 店CD（=エリア）単位のスライダー選択を反映
+              if (!isRowInMediaDisplay(name, cStr, r)) continue;
               allMediaTargetCopies += toNumber(r["部数"]);
+              allMediaTargetPrice  += toNumber(r["料金"]);
             }
           }
         }
@@ -3102,7 +4672,7 @@
 
         const typeSel = document.getElementById("typeSelect");
         if (typeMasterByGyotai && typeSel && typeSel.value) {
-          const rows = typeMasterByGyotai.get(typeSel.value) || [];
+          const rows = (pickTypeRowsForCurrentCombo(typeSel.value).rows || []);
           if (rows.length) {
             categories = new Set();
             mediaCap   = new Map();
@@ -3110,7 +4680,7 @@
             // 貢献度の絶対値の最大を取る
             let maxAbsContrib = 0;
             for (const r of rows) {
-              const contrib = Number(r["貢献度"] ?? 0);
+              const contrib = getTypeContrib(r);
               if (!Number.isFinite(contrib)) continue;
               const abs = Math.abs(contrib);
               if (abs > maxAbsContrib) maxAbsContrib = abs;
@@ -3122,7 +4692,7 @@
               const cat = String(r["媒体"] ?? "").trim();
               if (!cat) continue;
 
-              const contrib = Number(r["貢献度"] ?? 0);
+              const contrib = getTypeContrib(r);
               const abs = Math.max(0, Math.abs(contrib));
               const normalized = abs / denom;        // 0〜1
               const cap = 0.3 + 0.7 * normalized;    // 0.3〜1.0
@@ -3234,7 +4804,8 @@
               const set = mediaViewByName.get(mediaName);
               if (set && !set.has(codeStr)) continue;
             }
-
+            // ★ 部数調整ゲージは「店CD単位の選択」として扱う（行単位で判定）
+            if (!isRowInMediaDisplay(mediaName, codeStr, mr)) continue;
 
             const cps   = toNumber(mr["部数"]);
             const price = toNumber(mr["料金"]);
@@ -3434,11 +5005,17 @@
         // 部数と世帯比率購読率だけは、
         // 「基準ONの各媒体の全選択町」を反映した値で上書きする
         metricsAll.copiesTotal = allMediaTargetCopies;
+        metricsAll.priceTotal  = allMediaTargetPrice;
         metricsAll.subRate =
           (metricsAll.hhTotal > 0 && allMediaTargetCopies > 0)
             ? (allMediaTargetCopies / metricsAll.hhTotal)
             : null;
 
+
+        // 料金を上書きしたので、来店期待値あたりコストも整合させる
+        metricsAll.costPerVisit = (metricsAll.visitRaw && allMediaTargetPrice > 0)
+          ? (allMediaTargetPrice / metricsAll.visitRaw)
+          : null;
         rowsData.push({
           kind: "all",
           label: "全媒体対象",
@@ -3456,30 +5033,66 @@
           // ★ まず「この媒体の選択町セット」を媒体ビュー側から取得
           //    - 一度でも媒体ビューで触った媒体：必ず Set が存在
           //    - まだ触っていない媒体：undefined のまま
-          let codesForMedia = [];
-          const set = mediaViewByName.get(name);
+          let codesForMedia = Array.from(getMediaDisplaySet(name)).map(String);
 
-          if (set) {
-            // セットが存在する = 媒体ビューで一度は触っている
-            // （全部外して 0 件になっていても、その 0 件が正解）
-            codesForMedia = Array.from(set).map(String);
-          } else {
-            // まだ媒体ビューで触っていない媒体は、
-            // 「基準ビューで選択されている町のうち、この媒体が出ている町」
-            // を今までどおり対象にする
-            for (const code of selectedCodes) {
-              const rowsForTown = mediaIndex.get(String(code)) || [];
-              const hasThis = rowsForTown.some(r => {
-                const mName = r["媒体名"] ?? "(名称不明)";
-                return mName === name;
-              });
-              if (hasThis) codesForMedia.push(String(code));
+          // 注：以前は mediaViewByName（媒体ビューで触った手動セット）や selectedCodes（基準ビュー）を元にしていたが、
+          //     それだと「自動選択で作った31200部」以上にスライダーで増やしても、増分が codesForMedia に入らず
+          //     指標（部数/料金/世帯など）が31200どまりになる。
+          //     ここでは常に「表示セット（店CD=エリア単位の間引き後）」を媒体ごとの計算母集団にする。
+
+          // ★ スライダー（店CD単位の間引き）を“各媒体行の対象町”にも反映する
+          //   calcMetrics は「codes に入っている町の人口/世帯」を先に足すため、
+          //   スライダーでその町の当該媒体が 0 行になっても、町集合が残っていると
+          //   年齢/世帯/人口などが動かず「媒体行が変わらない」ように見える。
+          //   そこで「この媒体がスライダー後も1行でも残っている町」だけに codes を絞る。
+          if (mediaIndex && codesForMedia.length) {
+            const filtered = [];
+            for (const c0 of codesForMedia) {
+              const cStr = String(c0);
+              const rowsForTown = mediaIndex.get(cStr) || [];
+              let keepTown = false;
+              for (const r of rowsForTown) {
+                const rName = r["媒体名"] ?? "(名称不明)";
+                if (rName !== name) continue;
+                if (!isMediaEnabled(rName)) continue;
+                if (!isRowInMediaDisplay(name, cStr, r)) continue;
+                keepTown = true;
+                break;
+              }
+              if (keepTown) filtered.push(cStr);
             }
+            codesForMedia = filtered;
           }
 
           let metrics;
           if (codesForMedia.length) {
             metrics = calcMetrics(codesForMedia, name);
+// ★ 部数/料金は「表示セット(店CD単位)」の行だけで再集計して上書き（ゲージ反映）
+if (mediaIndex && codesForMedia && codesForMedia.length) {
+  let dispBu = 0;
+  let dispRy = 0;
+  for (const c0 of codesForMedia) {
+    const cStr = String(c0);
+    const rowsForTown = mediaIndex.get(cStr) || [];
+    for (const r of rowsForTown) {
+      const rName = r["媒体名"] ?? "(名称不明)";
+      if (rName !== name) continue;
+      if (!isMediaEnabled(rName)) continue;
+      if (!isRowInMediaDisplay(name, cStr, r)) continue;
+      dispBu += toNumber(r["部数"]);
+      dispRy += toNumber(r["料金"]);
+    }
+  }
+  metrics.copiesTotal = dispBu;
+  metrics.priceTotal  = dispRy;
+  metrics.subRate     = (metrics.hhTotal > 0 && dispBu > 0) ? (dispBu / metrics.hhTotal) : null;
+  // visitRaw / viewRate は calcMetrics 側で display 行判定込みなので、costPerVisit だけ更新
+  if (metrics.visitRaw && metrics.visitRaw > 0 && dispRy > 0) {
+    metrics.costPerVisit = dispRy / metrics.visitRaw;
+  } else {
+    metrics.costPerVisit = null;
+  }
+}
           } else {
             // 配布していない / 媒体ビューで全部外された媒体は完全ゼロ
             metrics = {
@@ -3496,12 +5109,12 @@
               attrHhRate: null,
               attrPopRate: null,
               hasAttr: !!attrKeys.length,
-              // 推測視認率・来店期待値・コスパも空
               viewRate: null,
               visitRaw: null,
               costPerVisit: null
             };
           }
+
 
 
           rowsData.push({
@@ -3565,6 +5178,7 @@
           <th>媒体</th>
           <th>部数</th>
           <th>料金</th>
+          <th>部数調整</th>
           <th>平均年齢</th>
           <th>男平均年齢</th>
           <th>女平均年齢</th>
@@ -3628,6 +5242,31 @@
 
         const disabledClass = isMedia && !row.enabled ? " media-row-disabled" : "";
 
+        // 媒体行だけ「部数調整スライダー」を出す
+        // ★目標ロック中は「ロック対象以外の媒体は非表示」にする
+        let scaleCell = "";
+        if (isMedia) {
+          const params = getSliderParamsForMedia(row.mediaName);
+          if (!params.show) {
+            return "";
+          }
+
+          const wrapDisabled = (row.enabled && !params.disabled) ? "" : "disabled";
+          const sliderDisabled = (row.enabled && !params.disabled) ? "" : "disabled";
+
+          scaleCell = `
+            <div class="media-scale-wrap ${wrapDisabled}" title="スライダーで配布量を調整（ダブルクリックで最大）">
+              <input type="range"
+                     class="media-scale"
+                     min="${params.min}" max="${params.max}" step="${params.step}"
+                     value="${params.value}"
+                     data-media-name="${escHtml(row.mediaName)}"
+                     ${sliderDisabled}>
+              <span class="media-scale-val">${params.pct}%</span>
+            </div>
+          `;
+        }
+
         return `
           <tr ${rowAttrs} class="${disabledClass}">
             <td class="center">${viewCell}</td>
@@ -3635,6 +5274,7 @@
             <td>${escHtml(row.label)}</td>
             <td class="num">${fmtInt(m.copiesTotal)}</td>
             <td class="num">${fmtInt(m.priceTotal)}</td>              <!-- ★ 料金 -->
+            <td>${scaleCell}</td>
             <td class="num">${fmt1(m.avgAge, "歳")}</td>
             <td class="num">${fmt1(m.maleAvgAge, "歳")}</td>          <!-- ★ 男平均年齢 -->
             <td class="num">${fmt1(m.femaleAvgAge, "歳")}</td>        <!-- ★ 女平均年齢 -->
@@ -3669,7 +5309,7 @@
 
     // ★ 属性優先：選択した属性の「人口比率」が高くなるように自動選択
     async function runAttributeFocus() {
-      resetFrontierCaches();
+      resetSelectionsForAutoStart();
 
       const msg = $("selectMsg");
       const attrKeys = getSelectedAttributeKeys();
@@ -3707,9 +5347,9 @@
         $("distInput")?.classList.remove("hit");
 
         const centerForRadius =
-          lastClickLngLat ??
-          centroidOf(baseCode || "") ??
-          getMapCenterLngLat();
+        centroidOf(baseCode || "") ??
+        lastClickLngLat ??
+        getMapCenterLngLat();
 
         // 半径制約（km → m）は既に targetDist に反映済み
         let allowedInRadius = null;
@@ -3795,6 +5435,7 @@
           }
 
           selected.add(bestFirst.code);
+          rememberTownAddedToBase(bestFirst.code);
           attrTotal += bestFirst.attr;
           popTotal  += bestFirst.basePop;
           totalYen   = bestFirst.nextY;
@@ -3806,6 +5447,7 @@
           );
           if (!seedLRU.has(bestFirst.code)) seedLRU.set(bestFirst.code, -1);
           autoExpandMediaFromBaseTown(String(bestFirst.code));
+          refreshMediaDisplaysForTown(bestFirst.code);
 
           if (!baseStr) {
             baseCode = String(bestFirst.code);
@@ -3820,6 +5462,8 @@
         let order = getInitialSeeds(allowedInRadius);
         let stoppedBy = null;
         let step = 0;
+        const AUTO_UI_INTERVAL_MS = 2000;
+        let lastUiUpdate = performance.now();
 
         while (true) {
           if (STOP.requested) {
@@ -3925,6 +5569,7 @@
               const f = fallbackCandidates[0];
 
               selected.add(f.code);
+              rememberTownAddedToBase(f.code);
               attrTotal += f.addAttr;
               popTotal  += f.addPop;
               totalYen   = f.nextY;
@@ -3936,14 +5581,16 @@
               );
               if (!seedLRU.has(f.code)) seedLRU.set(f.code, -1);
               autoExpandMediaFromBaseTown(String(f.code));
+              refreshMediaDisplaysForTown(f.code);
 
               // 次ループ用にシードを再構築して継続
               order = getInitialSeeds(allowedInRadius);
               step++;
-              if ((step % 50) === 0) {
+              if ((performance.now() - lastUiUpdate) >= AUTO_UI_INTERVAL_MS) {
                 updateAggregates();
                 updateAttrMetrics();
-                await sleep(0);
+                await sleep(0); // 描画に譲る
+                lastUiUpdate = performance.now();
               }
 
               // ★ ここで「追加後に超えたか」をチェック
@@ -3969,6 +5616,7 @@
 
           // ★ ここからは通常の「best」（スコア対象の町）を採用
           selected.add(best.code);
+          rememberTownAddedToBase(best.code);
           attrTotal += best.attr;
           popTotal  += best.basePop;
           totalYen   = best.nextY;
@@ -3980,6 +5628,7 @@
           );
           if (!seedLRU.has(best.code)) seedLRU.set(best.code, -1);
           autoExpandMediaFromBaseTown(String(best.code));
+          refreshMediaDisplaysForTown(best.code);
 
           order = getInitialSeeds(allowedInRadius);
 
@@ -3994,10 +5643,11 @@
           }
 
           step++;
-          if ((step % 50) === 0) {
+          if ((performance.now() - lastUiUpdate) >= AUTO_UI_INTERVAL_MS) {
             updateAggregates();
             updateAttrMetrics();
-            await sleep(0);
+            await sleep(0); // 描画に譲る
+            lastUiUpdate = performance.now();
           }
         } // ← while(true) ここで閉じる
 
@@ -4017,6 +5667,15 @@
         $("budgetInput")?.classList.toggle("hit", yenHit);
         $("copiesInput")?.classList.toggle("hit", copiesHit);
         $("distInput")?.classList.toggle("hit", distHit);
+
+        // ★ 料金/部数いずれかの目標に到達していれば、ロックモードへ
+        // （両方設定時は「先に到達した側」を全媒体のゲージ基準にする）
+        const goalHitAny = ((targetYen > 0 && totalYen >= targetYen) || (targetCopies > 0 && totalCps >= targetCopies));
+        if (goalHitAny) {
+          buildGoalLockFromCurrentSelection(targetYen, targetCopies, stoppedBy);
+          updateAggregates();
+          updateAttrMetrics();
+        }
 
         const parts = [];
         parts.push(`選択 ${selected.size}件`);
@@ -4045,6 +5704,8 @@
           (stoppedBy ? ` / 停止理由: ${stoppedBy}` : "");
       } finally {
         finishAuto();
+        // ★自動選択後、最適化ボタンを目立たせる
+        emphasizeOptimizeButtons();
       }
     }
 
@@ -4075,6 +5736,382 @@
       renderTargetRadius();
       updateBaseFeatureState();
     });
+
+
+    // ★追加：今使っている媒体カテゴリの中から「最適組み合わせ」を選び、他媒体を除外
+    document.getElementById("keepBestComboBtn")?.addEventListener("click", () => {
+      const hintEl = document.getElementById("keepBestComboHint");
+      if (hintEl) hintEl.textContent = "";
+
+      const sel = document.getElementById("typeSelect");
+      const gy = sel ? String(sel.value || "") : "";
+
+      if (!gy) {
+        if (hintEl) hintEl.textContent = "業態を選択すると、最適な媒体組み合わせに絞れます。";
+        return;
+      }
+
+      runWithBusy(() => {
+        const best = pickBestComboGroupForCurrentUsage(gy);
+        if (!best) {
+          if (hintEl) {
+            const used = Array.from(getUsedMediaCategories()).map(normalizeTypeCategory).filter(Boolean);
+            hintEl.textContent = used.length
+              ? `該当する組み合わせが見つかりません（使用中: ${used.join("+")}）` 
+              : "使用中の媒体がありません。";
+          }
+          return;
+        }
+
+        applyBestComboToEnabledMedia(best);
+
+        const inside = getCenterInsideLabel() || "(市内外未判定)";
+        const cats = (best.cats || []).map(normalizeTypeCategory).filter(Boolean);
+        const metaName = best?.meta?.comboName || best?.meta?.listStr || best.key || "";
+        const score = best._csvScore || {};
+        const tw = (score.totalWeighted != null && Number.isFinite(score.totalWeighted))
+          ? Math.round(score.totalWeighted).toLocaleString()
+          : "-";
+        const pw = (score.positiveWeighted != null && Number.isFinite(score.positiveWeighted))
+          ? Math.round(score.positiveWeighted).toLocaleString()
+          : "-";
+
+        if (hintEl) {
+          hintEl.innerHTML = `中心地: <b>${escHtml(inside)}</b> / 採用: <b>${escHtml(cats.join("+"))}</b><br>`
+            + `参照組み合わせ: ${escHtml(metaName)} / 重み付き貢献度合計: ${escHtml(tw)}（正の合計: ${escHtml(pw)}）`;
+        }
+        const msg = document.getElementById("selectMsg");
+        if (msg) msg.innerHTML = `最適組み合わせに絞りました：<b>${escHtml(cats.join("+"))}</b>（中心地: ${escHtml(inside)}）`;
+      }, "最適組み合わせを選定中…");
+    });
+
+
+    // ★追加：最適な予算配分に振り分け（type_master_all.csv の推奨配分%を使って各媒体ゲージを調整）
+    function getTypeBudgetPct(r){
+      const v =
+        (r && (
+          r["広告予算配分_推奨(0%下限正規化%)"] ??
+          r["広告予算配分_推奨(0％下限正規化%)"] ??
+          r["広告予算配分_推奨(0%下限正規化%) "] ??
+          r["広告予算配分_推奨(0％下限正規化%) "] ??
+          r["広告予算配分_推奨(正規化%)"]
+        )) ?? 0;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function buildBudgetPctByCategory(rows){
+      const map = new Map(); // cat -> pct(0-100)
+      for (const r of (rows || [])){
+        const cat = normalizeTypeCategory(String(r["媒体"] ?? "").trim());
+        if (!cat) continue;
+        const pct = getTypeBudgetPct(r);
+        if (!Number.isFinite(pct)) continue;
+        map.set(cat, pct);
+      }
+      return map;
+    }
+
+    function getCurrentYenForMediaLocked(m){
+      const gains = GOAL_LOCK.areaGainByMedia.get(String(m)) || [];
+      const v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(String(m)) || 0));
+      let y = 0;
+      for (let i=0; i<v && i<gains.length; i++) y += toNumber(gains[i]?.yen || 0);
+      return y;
+    }
+
+    function pickCountForTargetYenLocked(m, targetYen){
+      const name = String(m);
+      const gains = GOAL_LOCK.areaGainByMedia.get(name) || [];
+      const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(name) || 0));
+      const len = Math.min(gains.length, maxCount);
+      if (!(targetYen > 0) || len <= 0) return 0;
+
+      let sum = 0;
+      for (let i=0; i<len; i++){
+        const add = toNumber(gains[i]?.yen || 0);
+        const next = sum + add;
+        if (next >= targetYen){
+          const diffBefore = Math.abs(targetYen - sum);
+          const diffAfter  = Math.abs(next - targetYen);
+          return (diffAfter < diffBefore) ? (i+1) : i;
+        }
+        sum = next;
+      }
+      return len;
+    }
+
+    function getOrderedAreasForMediaNormal(m, maxSet){
+      const name = String(m);
+      const maxAreas = getMaxAreasForMedia(name, maxSet);
+      if (!maxAreas || !maxAreas.size) return [];
+      const orderArr = mediaAreaOrderByName.get(name) || [];
+      let orderedAreas = [];
+
+      if (orderArr.length) {
+        orderedAreas = orderArr.map(String).filter(a => maxAreas.has(a));
+      } else {
+        const tmp = [];
+        const seen = new Set();
+        for (const c0 of baseSelectOrder) {
+          const c = String(c0);
+          if (!maxSet.has(c)) continue;
+          const rows = mediaIndex?.get(c) || [];
+          for (const r of rows) {
+            const mm = r["媒体名"] ?? "(名称不明)";
+            if (String(mm) !== name) continue;
+            const a = getMediaAreaCodeFromRow(r, c);
+            if (!maxAreas.has(a)) continue;
+            if (seen.has(a)) continue;
+            seen.add(a);
+            tmp.push(a);
+          }
+        }
+        orderedAreas = tmp;
+      }
+
+      // 順序配列に無いエリアは末尾に補完
+      const setOrdered = new Set(orderedAreas);
+      for (const a of maxAreas) {
+        if (!setOrdered.has(a)) orderedAreas.push(a);
+      }
+      return orderedAreas;
+    }
+
+    function pickKeepNForTargetYenNormal(m, targetYen, orderedAreas, maxSet){
+      const name = String(m);
+      const len = (orderedAreas || []).length;
+      if (!(targetYen > 0) || len <= 0) return 0;
+
+      let sum = 0;
+      for (let i=0; i<len; i++){
+        const gain = computeAreaGainForMedia(name, orderedAreas[i], maxSet);
+        const add = toNumber(gain?.yen || 0);
+        const next = sum + add;
+        if (next >= targetYen){
+          const diffBefore = Math.abs(targetYen - sum);
+          const diffAfter  = Math.abs(next - targetYen);
+          return (diffAfter < diffBefore) ? (i+1) : i;
+        }
+        sum = next;
+      }
+      return len;
+    }
+
+    
+    document.getElementById("applyOptimalBudgetBtn")?.addEventListener("click", () => {
+      const sel = document.getElementById("typeSelect");
+      const gy = sel ? String(sel.value || "") : "";
+      const msg = document.getElementById("selectMsg");
+
+      if (!gy) {
+        if (msg) msg.innerHTML = "業態を選択してから「最適予算配分にする」を押してください。";
+        return;
+      }
+
+      runWithBusy(() => {
+        const picked = pickTypeRowsForCurrentCombo(gy);
+        const rows = picked?.rows || [];
+        const inside = getCenterInsideLabel() || "(市内外未判定)";
+
+        const pctByCat = buildBudgetPctByCategory(rows);
+        if (!pctByCat.size) {
+          if (msg) msg.innerHTML = "この業態の予算配分（type_master_all.csv）が見つかりません。";
+          return;
+        }
+
+        // チェックON媒体（ゲージ0含む）だけを対象にする
+        const enabledMedias = [];
+        for (const m0 of getAllMediaNames()){
+          const m = String(m0);
+          if (!isMediaEnabled(m)) continue;
+          enabledMedias.push(m);
+        }
+        if (!enabledMedias.length) {
+          if (msg) msg.innerHTML = "対象媒体（チェックON）がありません。";
+          return;
+        }
+
+        // cat -> medias（正規化カテゴリでまとめる）
+        const mediaByCatLocal = new Map();
+        for (const m of enabledMedias){
+          const cat = normalizeTypeCategory(mediaCategoryByName.get(m) || "");
+          if (!cat) continue;
+          if (!mediaByCatLocal.has(cat)) mediaByCatLocal.set(cat, []);
+          mediaByCatLocal.get(cat).push(m);
+        }
+
+        // 目標予算があればそれを優先。無ければ現状の全媒体合計(料金)を固定して配分。
+        let totalBudget = 0;
+        if (isGoalLockOn() && (GOAL_LOCK.targetYen > 0)) {
+          totalBudget = GOAL_LOCK.targetYen;
+        } else {
+          const tot0 = isGoalLockOn() ? getCurrentAllMediaTotalsLocked() : getCurrentAllMediaTotals();
+          totalBudget = Math.max(0, Math.round(tot0.yen || 0));
+        }
+        if (!(totalBudget > 0)) {
+          if (msg) msg.innerHTML = "予算（料金）が 0 のため、配分できません。";
+          return;
+        }
+
+        // catState を構築（カテゴリ目標に達したら、そのカテゴリは終了）
+        const catState = new Map();
+        for (const [cat, pct] of pctByCat.entries()){
+          const list = (mediaByCatLocal.get(cat) || []).slice();
+          if (!list.length) continue;
+
+          const p = Math.max(0, Math.min(100, Number(pct)));
+          const tgt = Math.max(0, Math.round(totalBudget * (p / 100)));
+          catState.set(cat, { target: tgt, total: 0, medias: list, done: false });
+        }
+        if (!catState.size) {
+          if (msg) msg.innerHTML = "この配分に該当するカテゴリの媒体が現在の構成にありません。";
+          return;
+        }
+
+        if (isGoalLockOn()) {
+          // ===== 目標ロック中：店CD数スライダー（valueCount）を毎回 0 から積み上げ =====
+          // activeMediaSet は「チェックON」のみを正とする
+          GOAL_LOCK.activeMediaSet = new Set(enabledMedias);
+
+          for (const m of enabledMedias){
+            ensureGoalLockMediaPrepared(m);
+            GOAL_LOCK.valueCountByMedia.set(m, 0); // ★毎回ゼロから
+          }
+
+          let guard = 0;
+          while (guard < 500000){
+            let progressed = false;
+            let anyOpen = false;
+
+            for (const [cat, st] of catState.entries()){
+              if (st.done) continue;
+              anyOpen = true;
+
+              if (st.target <= 0 || st.total >= st.target) {
+                st.done = true;
+                continue;
+              }
+
+              let catProgress = false;
+              for (const m of st.medias){
+                if (st.total >= st.target) { st.done = true; break; }
+
+                const v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+                const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+                if (v >= maxCount) continue;
+
+                const gains = GOAL_LOCK.areaGainByMedia.get(m) || [];
+                const add = toNumber(gains[v]?.yen || 0);
+
+                GOAL_LOCK.valueCountByMedia.set(m, v + 1);
+                st.total += add;
+
+                progressed = true;
+                catProgress = true;
+              }
+
+              if (!st.done && !catProgress) st.done = true; // これ以上増やせない
+            }
+
+            if (!anyOpen || !progressed) break;
+            guard++;
+          }
+
+          // 画面反映（まとめて）
+          for (const m of enabledMedias){
+            recomputeMediaDisplaySet(m);
+            updateSliderUIForMedia(m);
+          }
+
+        } else {
+          // ===== 通常（％スライダー）：各媒体を 0 から同時に積み上げ、カテゴリ目標で停止 =====
+          // まず対象媒体を 0% に戻す（毎回ゼロから）
+          const keepNByMedia = new Map(); // m -> keepN(areas)
+          const areasByMedia = new Map(); // m -> orderedAreas[]
+          const yenByMediaArea = new Map(); // m -> yen array per area index
+
+          for (const m of enabledMedias){
+            setMediaScale(m, 0);
+            keepNByMedia.set(m, 0);
+
+            const maxSet = getMaxCodesForMedia(m);
+            const orderedAreas = getOrderedAreasForMediaNormal(m, maxSet);
+            areasByMedia.set(m, orderedAreas);
+
+            const yenArr = [];
+            for (let i=0; i<orderedAreas.length; i++){
+              const g = computeAreaGainForMedia(m, orderedAreas[i], maxSet);
+              yenArr.push(toNumber(g?.yen || 0));
+            }
+            yenByMediaArea.set(m, yenArr);
+          }
+
+          let guard = 0;
+          while (guard < 500000){
+            let progressed = false;
+            let anyOpen = false;
+
+            for (const [cat, st] of catState.entries()){
+              if (st.done) continue;
+              anyOpen = true;
+
+              if (st.target <= 0 || st.total >= st.target) {
+                st.done = true;
+                continue;
+              }
+
+              let catProgress = false;
+              for (const m of st.medias){
+                if (st.total >= st.target) { st.done = true; break; }
+
+                const orderedAreas = areasByMedia.get(m) || [];
+                const v = keepNByMedia.get(m) || 0;
+                if (v >= orderedAreas.length) continue;
+
+                const add = (yenByMediaArea.get(m) || [])[v] || 0;
+                keepNByMedia.set(m, v + 1);
+                st.total += add;
+
+                progressed = true;
+                catProgress = true;
+              }
+
+              if (!st.done && !catProgress) st.done = true;
+            }
+
+            if (!anyOpen || !progressed) break;
+            guard++;
+          }
+
+          // スライダー（％）に反映
+          for (const m of enabledMedias){
+            const orderedAreas = areasByMedia.get(m) || [];
+            const keepN = Math.max(0, Math.round(keepNByMedia.get(m) || 0));
+            const scale = orderedAreas.length ? (keepN / orderedAreas.length) : 0;
+            setMediaScale(m, Math.max(0, Math.min(1, scale)));
+            recomputeMediaDisplaySet(m);
+            updateSliderUIForMedia(m);
+          }
+        }
+
+        // 媒体ビュー中なら、表示している媒体のセットを同期（地図更新）
+        syncMediaViewSetIfNeeded();
+
+        // 画面反映
+        applyViewSelection();
+        updateAggregates();
+        updateAttrMetrics();
+        updateBaseFeatureState();
+
+        if (msg) {
+          const cats = Array.from(pctByCat.keys()).join("+");
+          const total10k = Math.round(totalBudget / 10000);
+          msg.innerHTML = `最適予算配分を適用しました：<b>${escHtml(cats)}</b> / 中心地: ${escHtml(inside)} / 予算: ${total10k.toLocaleString()} 万円`;
+        }
+      }, "最適予算配分を適用中…");
+    });
+
 
 
 
@@ -4141,40 +6178,67 @@
       const val = sel.value;
 
       if (!val) {
-        box.textContent = "業態を選ぶと、媒体ごとの SHAP / 貢献度 と、選択中配布町ベースの 推測視認率 / 来店期待値 を表示します。";
+        box.textContent = "業態を選ぶと、媒体ごとの SHAP / 貢献度（媒体組み合わせ別）と、選択中配布町ベースの 推測視認率 / 来店期待値 を表示します。";
         return;
       }
 
-      const rows = typeMasterByGyotai.get(val) || [];
+      const pick = pickTypeRowsForCurrentCombo(val);
+      const rows = pick.rows || [];
+
       if (!rows.length) {
         box.textContent = "この業態のデータがありません。";
         return;
       }
 
-      // まずは従来通り：媒体ごとの SHAP / 貢献度 一覧
+      const hasCombo = (rows[0] && (rows[0]["採用媒体一覧"] != null || rows[0]["組み合わせ名"] != null));
+      const showBudget = hasCombo && (rows[0]["広告予算配分_推奨(0%下限正規化%)"] != null || rows[0]["広告予算配分_推奨(RAW比)"] != null);
+
+      // 媒体ごとの一覧（組み合わせ別）
       const htmlRows = rows.map(r => {
-        const shap = typeof r["SHAP"] === "number"
-          ? r["SHAP"]
-          : Number(r["SHAP"] || 0);
-        const contrib = typeof r["貢献度"] === "number"
-          ? r["貢献度"]
-          : Number(r["貢献度"] || 0);
+        const media = (r["媒体"] ?? "");
+        const shap = getTypeShap(r);
+        const contrib = getTypeContrib(r);
+
+        // 予算配分（あるときだけ）
+        const recNorm = (r["広告予算配分_推奨(0%下限正規化%)"] != null) ? Number(r["広告予算配分_推奨(0%下限正規化%)"]) : null;
+        const recRaw  = (r["広告予算配分_推奨(RAW比)"] != null) ? Number(r["広告予算配分_推奨(RAW比)"]) : null;
 
         return `
           <tr>
-            <td>${r["媒体"] ?? ""}</td>
-            <td>${isFinite(shap) ? shap.toFixed(4) : ""}</td>
-            <td>${isFinite(contrib) ? contrib.toFixed(4) : ""}</td>
+            <td>${escHtml(media)}</td>
+            <td class="num">${Number.isFinite(shap) ? shap.toFixed(4) : ""}</td>
+            <td class="num">${Number.isFinite(contrib) ? contrib.toFixed(2) : ""}</td>
+            ${showBudget ? `<td class="num">${Number.isFinite(recNorm) ? recNorm.toFixed(1) : (Number.isFinite(recRaw) ? recRaw.toFixed(1) : "")}</td>` : ``}
           </tr>
         `;
       }).join("");
 
-      // 選択中の配布町 × この業態に紐づく全媒体 から
-      // 推測視認率＆来店期待値を1行ずつ計算
+      // 組み合わせの説明（使っている媒体カテゴリ → マッチした組み合わせ）
+      let comboInfo = "";
+      if (hasCombo) {
+        const usedCats = Array.from(getUsedMediaCategories()).sort((a,b)=>a.localeCompare(b,"ja"));
+        const usedText = usedCats.length ? usedCats.join(" + ") : "（未確定）";
+        const matched = pick?.meta?.comboName || (rows[0]["組み合わせ名"] ?? "");
+        const listStr = pick?.meta?.listStr || (rows[0]["採用媒体一覧"] ?? "");
+        const matchNote =
+          pick.match === "exact"   ? "一致" :
+          pick.match === "subset"  ? "部分一致（データがある最大の組み合わせに寄せています）" :
+          pick.match === "closest" ? "近い組み合わせ（完全一致がないため）" :
+          "（業態のみ）";
+
+        comboInfo = `
+          <div class="muted" style="font-size:11px;margin:6px 0 2px;">
+            中心地：<b>${escHtml(getCenterInsideLabel() || "（不明）")}</b><br>
+            使用中の媒体カテゴリ：<b>${escHtml(usedText)}</b><br>
+            参照した組み合わせ：<b>${escHtml(matched || listStr || "不明")}</b>（${escHtml(matchNote)}）
+          </div>
+        `;
+      }
+
+      // 推測視認率＆来店期待値（組み合わせ別の cap を使う）
       const metrics = computeGyotaiMetrics(val);
 
       let summaryHtml = "";
-
       if (metrics.viewRate != null || metrics.visitRaw != null) {
         const viewPct    = metrics.viewRate != null ? (metrics.viewRate * 100).toFixed(1) : null;
         const visitIndex = metrics.visitRaw  != null ? Math.round(metrics.visitRaw)       : null;
@@ -4183,63 +6247,34 @@
           <div class="type-metrics-box">
             <div class="type-metrics-row">
               <span class="type-metrics-label">推測視認率（選択中配布町ベース）</span>
-              <span class="type-metrics-value">${
-                viewPct !== null ? `${viewPct}%` : `-`
-              }</span>
+              <span class="type-metrics-value">${viewPct !== null ? `${viewPct}%` : `-`}</span>
             </div>
             <div class="type-metrics-row">
               <span class="type-metrics-label">来店期待値（距離減衰付き指数）</span>
-              <span class="type-metrics-value">${
-                visitIndex !== null ? visitIndex.toLocaleString() : `-`
-              }</span>
+              <span class="type-metrics-value">${visitIndex !== null ? visitIndex.toLocaleString() : `-`}</span>
             </div>
           </div>
-          <details class="type-metrics-note">
-            <summary>指標の計算ロジックを表示</summary>
-            <div>
-              <ul>
-                <li>対象は「現在選択されている町丁目（※基準の町は除外）」かつ、この業態に紐づく媒体
-                  （<code>type_master.業態 = 選択業態</code> で絞り、
-                  <code>type_master.媒体</code> と <code>media_master.分類</code> を一致させた媒体）です。</li>
-                  <li>各媒体の「貢献度」の絶対値を、業態内の最大値で割って 0〜1 に正規化し、
-                  <code>視認上限 = 0.3 + 0.7 × 正規化貢献度</code> として媒体ごとの特性を表現します。</li>
-                <li>各町丁目では、その町に出ている該当媒体の部数を合計し、
-                  部数で重み付けした視認上限の平均を <code>capTown</code> とします。</li>
-                <li>その町の世帯数を <code>H</code>、該当媒体の合計部数を <code>C</code> とすると、
-                  <code>baseCoverage = min(1, C / H)</code>（1世帯1部までは100%視認とみなす）、
-                  実際の視認率は <code>coverage = baseCoverage × capTown</code> とします。</li>
-                <li>推測視認率（全体）は、選択全町の世帯数で加重平均した値です：
-                  <code>推測視認率 = (Σ H<sub>i</sub> × coverage<sub>i</sub>) / Σ H<sub>i</sub></code></li>
-                <li>来店期待値は、起点（クリック位置 &gt; 基準の町 &gt; 地図中心）から各町の中心までの距離
-                  <code>d<sub>i</sub> [km]</code> に対して
-                  <code>距離重み w<sub>i</sub> = 1 / (1 + d<sub>i</sub>)</code> を掛け、
-                  <code>来店期待値指数 = Σ H<sub>i</sub> × coverage<sub>i</sub> × w<sub>i</sub></code>
-                  として算出しています（数値が大きいほど来店期待が高いイメージ）。</li>
-              </ul>
-            </div>
-          </details>
         `;
       } else {
         summaryHtml = `
           <div class="type-metrics-box">
             <div class="type-metrics-row">
               <span class="type-metrics-label">推測視認率 / 来店期待値</span>
-              <span class="type-metrics-value" style="font-size:14px;">
-                計算対象となる配布町がありません
-              </span>
+              <span class="type-metrics-value" style="font-size:14px;">計算対象となる配布町がありません</span>
             </div>
           </div>
         `;
       }
 
-
       box.innerHTML = `
+        ${comboInfo}
         <table>
           <thead>
             <tr>
               <th>媒体</th>
-              <th>SHAP</th>
-              <th>貢献度</th>
+              <th class="num">${hasCombo ? "接触者平均(Shapley)" : "SHAP"}</th>
+              <th class="num">${hasCombo ? "重み付き貢献度" : "貢献度"}</th>
+              ${showBudget ? `<th class="num">予算配分(%)</th>` : ``}
             </tr>
           </thead>
           <tbody>
@@ -4251,8 +6286,7 @@
         </div>
       `;
     }
-
-    // ★ セレクト変更時 & 再計算ボタン押下時に同じ処理を呼ぶ
+// ★ セレクト変更時 & 再計算ボタン押下時に同じ処理を呼ぶ
     function handleTypeMetricsChange() {
       // 業態指標（上部の SHAP / 貢献度・推測視認率など）
       renderTypeMetrics();
@@ -4412,45 +6446,102 @@
         }
 
         if (byName.size) {
+
+          function calcMediaStatOnCodes(mediaName, codeSet, areaSet) {
+            const stat = { 件数: 0, 部数: 0, 料金: 0 };
+            if (!codeSet || !codeSet.size || !mediaIndex) return stat;
+            const m = String(mediaName);
+            const aSet = (areaSet && areaSet.size) ? areaSet : null;
+            for (const code0 of codeSet) {
+              const code = String(code0);
+              const rowsForTown = mediaIndex.get(code);
+              if (!rowsForTown) continue;
+              for (const r of rowsForTown) {
+                const rName = r["媒体名"] ?? "(名称不明)";
+                if (String(rName) !== m) continue;
+                if (aSet) {
+                  const a = getMediaAreaCodeFromRow(r, code);
+                  if (!aSet.has(String(a))) continue;
+                }
+                stat.件数 += 1;
+                stat.部数 += toNumber(r["部数"]);
+                stat.料金 += toNumber(r["料金"]);
+              }
+            }
+            return stat;
+          }
+
           const sorted = Array.from(byName.entries())
-            .sort((a, b) => b[1].料金 - a[1].料金);
+            .map(([name, baseStat]) => {
+              const dispSet  = getMediaDisplaySet(name);
+              const dispAreaSet = getMediaDisplayAreaSet(name);
+              const dispStat = calcMediaStatOnCodes(name, dispSet, dispAreaSet);
+              return [name, baseStat, dispStat];
+            })
+            .sort((a, b) => (b[2].料金) - (a[2].料金));
 
           let totalBu = 0, totalRy = 0, totalN = 0;
           const escapeAttr = (s) => String(s).replace(/"/g, "&quot;");
 
-          const rowsHtml = sorted.map(([name, o]) => {
+          const rowsHtml = sorted
+            .map(([name, o, disp]) => {
             const enabled = isMediaEnabled(name);
 
+            // ★目標ロック中は「ロック対象以外の媒体は非表示」
+            const params = getSliderParamsForMedia(name);
+            if (!params.show) return "";
+
+            // ★表示値は「選択されている店CD（=表示セット）に含まれる分の合計」
+            const adjN  = disp.件数;
+            const adjBu = disp.部数;
+            const adjRy = disp.料金;
+
             if (enabled) {
-              totalN  += o.件数;
-              totalBu += o.部数;
-              totalRy += o.料金;
+              totalN  += adjN;
+              totalBu += adjBu;
+              totalRy += adjRy;
             }
 
             const rowClass    = enabled ? "" : "media-row-disabled";
             const btnLabel    = enabled ? "対象" : "除外中";
             const btnOffClass = enabled ? "" : "off";
+            const sliderDisabled = (enabled && !params.disabled) ? "" : "disabled";
+            const wrapDisabled = (enabled && !params.disabled) ? "" : "disabled";
+
+            const sliderCell = `
+                <div class="media-scale-wrap ${wrapDisabled}" title="スライダーで部数（=配布量）の調整">
+                  <input type="range"
+                         class="media-scale"
+                         min="${params.min}" max="${params.max}" step="${params.step}"
+                         value="${params.value}"
+                         data-media-name="${escapeAttr(name)}"
+                         ${sliderDisabled}>
+                  <span class="media-scale-val">${params.pct}%</span>
+                </div>`;
 
             return `<tr data-media-name="${escapeAttr(name)}"
                        class="media-row ${rowClass}"
                        title="クリックでこの媒体のビューに切り替え">
               <td>${name}</td>
-              <td>${fmtU(o.件数, "件")}</td>
-              <td>${fmtU(Math.round(o.部数), "部")}</td>
-              <td>${fmtU(Math.round(o.料金), "円")}</td>
+              <td>${fmtU(adjN, "件")}</td>
+              <td>${fmtU(adjBu, "部")}</td>
+              <td>${fmtU(adjRy, "円")}</td>
+              <td>${sliderCell}</td>
               <td>
                 <button type="button"
                         class="media-toggle ${btnOffClass}"
                         data-media-name="${escapeAttr(name)}">${btnLabel}</button>
               </td>
             </tr>`;
-          }).join("");
+          })
+          .filter(Boolean)
+          .join("");
 
           $("mediaStats").innerHTML = `
             <table>
               <thead>
                 <tr>
-                  <th>媒体名</th><th>件数</th><th>部数 合計</th><th>料金 合計</th><th>対象</th>
+                  <th>媒体名</th><th>件数</th><th>部数 合計</th><th>料金 合計</th><th>部数調整</th><th>対象</th>
                 </tr>
               </thead>
               <tbody>${rowsHtml}</tbody>
@@ -4458,8 +6549,9 @@
                 <tr>
                   <th>合計</th>
                   <th>${fmtU(totalN,  "件")}</th>
-                  <th>${fmtU(Math.round(totalBu), "部")}</th>
-                  <th>${fmtU(Math.round(totalRy), "円")}</th>
+                  <th>${fmtU(totalBu, "部")}</th>
+                  <th>${fmtU(totalRy, "円")}</th>
+                  <th></th>
                   <th></th>
                 </tr>
               </tfoot>
@@ -4731,8 +6823,9 @@
                 if (!isMediaEnabled(rName)) continue;
 
                 count += 1;
-                bu    += toNumber(r["部数"]);
-                ry    += toNumber(r["料金"]);
+                const scale = getMediaScale(rName);
+                bu    += toNumber(r["部数"]) * scale;
+                ry    += toNumber(r["料金"]) * scale;
               }
             }
 
@@ -4760,8 +6853,9 @@
               const mName = r["媒体名"] ?? "(名称不明)";
               if (!isMediaEnabled(mName)) continue;
               mediaCount += 1;
-              mediaBu    += toNumber(r["部数"]);
-              mediaRy    += toNumber(r["料金"]);
+              const scale = getMediaScale(mName);
+              mediaBu    += toNumber(r["部数"]) * scale;
+              mediaRy    += toNumber(r["料金"]) * scale;
             }
           }
 
@@ -5567,9 +7661,356 @@ ${Math.round(value).toLocaleString()}円（${(ratio*100).toFixed(1)}%）</title>
 
 
 
+    let mediaScaleUpdateTimer = null;
+
+    // ===== Busy overlay control（起動時と同じクルクルを流用 / 描画→重処理）=====
+function runWithBusy(runFn, msg="更新中…", delayMs = 0){
+  const token = showOverlayBusy(msg);
+
+  const kick = () => {
+    // 1) rAF: paint を予約
+    requestAnimationFrame(() => {
+      // 2) setTimeout: 実際に paint させてから重処理
+      setTimeout(() => {
+        try { runFn(); }
+        finally { hideOverlayBusy(token); }
+      }, 0);
+    });
+  };
+
+  if (delayMs > 0) {
+    mediaScaleUpdateTimer = setTimeout(kick, delayMs);
+  } else {
+    kick();
+  }
+}
+
+
+    function getSliderParamsForMedia(mediaName) {
+      const m = String(mediaName);
+      const enabled = isMediaEnabled(m);
+
+      // 目標ロック中：この媒体がロック対象なら「店CD数」スライダー
+      if (isGoalLockOn()) {
+        if (!GOAL_LOCK.activeMediaSet.has(m)) {
+          return { show: false };
+        }
+        const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+        const valCount = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+        const v = Math.max(0, Math.min(valCount, maxCount));
+        const pct = (maxCount > 0) ? Math.round((v / maxCount) * 100) : 0;
+        return {
+          show: true,
+          mode: "count",
+          min: 0,
+          max: maxCount,
+          step: 1,
+          value: v,
+          pct,
+          disabled: !enabled
+        };
+      }
+
+      // 通常：％スライダー（5%刻み）
+      const scale = getMediaScale(m);
+      const pct = Math.round((Number.isFinite(scale) ? scale : 1) * 100);
+      const p = Math.max(0, Math.min(100, pct));
+      return {
+        show: true,
+        mode: "pct",
+        min: 0,
+        max: 100,
+        step: 5,
+        value: p,
+        pct: p,
+        disabled: !enabled
+      };
+    }
+
+    function updateSliderUIForMedia(mediaName) {
+      const m = String(mediaName);
+      const params = getSliderParamsForMedia(m);
+      if (!params.show) return;
+
+      // ★ 同じ媒体のスライダーが複数（媒体別表 / 指標表）あるので、
+      //   セレクタ文字列に媒体名を埋め込まず、dataset一致で安全に全て更新する
+      const inputs = document.querySelectorAll('input.media-scale[data-media-name]');
+      for (let i = 0; i < inputs.length; i++) {
+        const input = inputs[i];
+        if (String(input.dataset.mediaName || '') !== m) continue;
+
+        input.min = String(params.min);
+        input.max = String(params.max);
+        input.step = String(params.step);
+        input.value = String(params.value);
+        input.disabled = !!params.disabled;
+
+        const tr = input.closest('tr[data-media-name]');
+        const span = tr ? tr.querySelector('.media-scale-val') : null;
+        if (span) span.textContent = String(params.pct) + '%';
+      }
+    }
+
+    function balanceOtherMediaToKeepGoal(changedMediaName) {
+      if (!isGoalLockOn()) return;
+      const changed = String(changedMediaName);
+      const ty = GOAL_LOCK.targetYen;
+      const tc = GOAL_LOCK.targetCopies;
+      if (!(ty > 0 || tc > 0)) return;
+
+      // 0部（=v=0）の媒体は常に調整対象外
+      // ★両方設定時は、全媒体合計で先に達した側（basisMetric）だけを維持する
+      const basis = (ty > 0 && tc > 0)
+        ? (GOAL_LOCK.basisMetric || 'yen')
+        : (ty > 0 ? 'yen' : 'cps');
+
+      const isHit = (tot) => {
+        if (basis === 'yen') return (ty <= 0 || tot.yen >= ty);
+        return (tc <= 0 || tot.cps >= tc);
+      };
+      const isOver = (tot) => {
+        if (basis === 'yen') return (ty > 0 && tot.yen > ty);
+        return (tc > 0 && tot.cps > tc);
+      };
+
+      let total = getCurrentAllMediaTotalsLocked();
+
+      // ---- 1) 不足なら：他媒体（0以外）を均等に +1 して補う ----
+      const incCandidates = () => {
+        const arr = [];
+        for (const m of GOAL_LOCK.activeMediaSet) {
+          if (m === changed) continue;
+          if (!isMediaEnabled(m)) continue;
+          let v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+          if (v <= 0) continue; // 0は調整対象外
+          const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+          if (v >= maxCount) continue;
+          arr.push(m);
+        }
+        return arr;
+      };
+
+      let guard = 0;
+      while (!isHit(total)) {
+        const arr = incCandidates();
+        if (!arr.length) break;
+        for (const m of arr) {
+          if (isHit(total)) break;
+          const gains = GOAL_LOCK.areaGainByMedia.get(m) || [];
+          const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+          let v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+          if (v <= 0 || v >= maxCount) continue;
+
+          // +1（prefix の次）
+          if (v < gains.length) {
+            total.yen += gains[v].yen;
+            total.cps += gains[v].cps;
+          }
+          v += 1;
+          GOAL_LOCK.valueCountByMedia.set(m, v);
+          recomputeMediaDisplaySet(m);
+          updateSliderUIForMedia(m);
+        }
+        if (guard++ > 100000) break;
+      }
+
+      // ---- 2) 余剰なら：他媒体（0以外）を均等に -1 して目標を維持 ----
+      const decCandidates = () => {
+        const arr = [];
+        for (const m of GOAL_LOCK.activeMediaSet) {
+          if (m === changed) continue;
+          if (!isMediaEnabled(m)) continue;
+          let v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+          if (v <= 0) continue; // 0は調整対象外
+
+          const gains = GOAL_LOCK.areaGainByMedia.get(m) || [];
+          const idx = Math.min(v - 1, gains.length - 1);
+          if (idx < 0) continue;
+
+          // この -1 をしても目標を割らないか
+          const nextY = total.yen - gains[idx].yen;
+          const nextC = total.cps - gains[idx].cps;
+          const ok = (basis === 'yen')
+            ? (ty <= 0 || nextY >= ty)
+            : (tc <= 0 || nextC >= tc);
+          if (!ok) continue;
+          arr.push(m);
+        }
+        return arr;
+      };
+
+      guard = 0;
+      while (isOver(total)) {
+        const arr = decCandidates();
+        if (!arr.length) break;
+        for (const m of arr) {
+          if (!isOver(total)) break;
+          let v = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+          if (v <= 0) continue;
+
+          const gains = GOAL_LOCK.areaGainByMedia.get(m) || [];
+          const idx = Math.min(v - 1, gains.length - 1);
+          if (idx < 0) continue;
+
+          // もう一度 ok 判定（total が変化しているため）
+          const nextY = total.yen - gains[idx].yen;
+          const nextC = total.cps - gains[idx].cps;
+          const ok = (basis === 'yen')
+            ? (ty <= 0 || nextY >= ty)
+            : (tc <= 0 || nextC >= tc);
+          if (!ok) continue;
+
+          total.yen = nextY;
+          total.cps = nextC;
+          v -= 1;
+          GOAL_LOCK.valueCountByMedia.set(m, v);
+          recomputeMediaDisplaySet(m);
+          updateSliderUIForMedia(m);
+        }
+        if (guard++ > 100000) break;
+      }
+    }
+
+    function applyMediaScaleFromSlider(inputEl, immediate = false) {
+      const tr = inputEl.closest('tr[data-media-name]');
+      const mediaName = inputEl.dataset.mediaName || (tr ? tr.getAttribute('data-media-name') : null);
+      if (!mediaName) return;
+      const m = String(mediaName);
+
+      // ------------------------------------------------------------
+      // 重要：ドラッグ中(input)は重い再計算を走らせない（ドラッグ不能になるため）
+      //       ドラッグを離した(change)タイミングでだけ、クルクル表示＋重い更新を実行する
+      // ------------------------------------------------------------
+
+      // 目標ロック中は「店CD数」スライダー
+      if (isGoalLockOn() && GOAL_LOCK.activeMediaSet.has(m)) {
+        const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
+        let v = Math.round(toNumber(inputEl.value));
+        v = Math.max(0, Math.min(maxCount, v));
+        if (String(inputEl.value) !== String(v)) inputEl.value = String(v);
+
+        // 値だけ先に保存（ドラッグ中はここまで）
+        GOAL_LOCK.valueCountByMedia.set(m, v);
+
+        const pct = (maxCount > 0) ? Math.round((v / maxCount) * 100) : 0;
+        const span = tr ? tr.querySelector('.media-scale-val') : null;
+        if (span) span.textContent = String(pct) + '%';
+
+        if (!immediate) {
+          // ドラッグ中：軽量更新のみ（表示は%だけ追従）
+          return;
+        }
+
+        // ドラッグを離した：重い更新をまとめて実行
+        runWithBusy(() => {
+          recomputeMediaDisplaySet(m);
+          updateSliderUIForMedia(m);
+
+          // 0まで下げた媒体は調整対象外（balance 側で v<=0 を除外）
+          balanceOtherMediaToKeepGoal(m);
+
+          updateAggregates();
+          renderTypeMetrics();
+          updateAttrMetrics();
+          if (viewMode === "media" && currentMediaName) {
+            // 他媒体の自動バランスで現在表示中の媒体セットが変わることがあるため、常に再取得して反映
+            mediaViewSet = new Set(getMediaDisplaySet(currentMediaName));
+            applyViewSelection();
+            updateViewStatus();
+          }
+        }, "更新中…");
+
+        return;
+      }
+
+      // 通常：％スライダー
+      let pct = toNumber(inputEl.value);
+      pct = Math.max(0, Math.min(100, pct));
+      if (String(inputEl.value) !== String(pct)) inputEl.value = String(pct);
+
+      // 値だけ保存（ドラッグ中はここまで）
+      setMediaScale(m, pct / 100);
+
+      const span = tr ? tr.querySelector('.media-scale-val') : null;
+      if (span) span.textContent = String(Math.round(pct)) + '%';
+
+      if (!immediate) {
+        // ドラッグ中：軽量更新のみ
+        return;
+      }
+
+      // ドラッグを離した：重い更新をまとめて実行
+      runWithBusy(() => {
+        recomputeMediaDisplaySet(m);
+
+        updateAggregates();
+        renderTypeMetrics();
+        updateAttrMetrics();
+        if (viewMode === "media" && currentMediaName) {
+          mediaViewSet = new Set(getMediaDisplaySet(currentMediaName));
+          applyViewSelection();
+          updateViewStatus();
+        }
+      }, "更新中…");
+    }
+
+$("mediaStats").addEventListener("input", (ev) => {
+      const el = ev.target;
+      if (!(el instanceof HTMLInputElement)) return;
+      if (!el.classList.contains("media-scale")) return;
+      applyMediaScaleFromSlider(el, false);
+    });
+
+    $("mediaStats").addEventListener("change", (ev) => {
+      const el = ev.target;
+      if (!(el instanceof HTMLInputElement)) return;
+      if (!el.classList.contains("media-scale")) return;
+      applyMediaScaleFromSlider(el, true);
+    });
+
+    $("mediaStats").addEventListener("dblclick", (ev) => {
+      const wrap = ev.target.closest(".media-scale-wrap");
+      if (!wrap) return;
+      const input = wrap.querySelector("input.media-scale");
+      if (!input || input.disabled) return;
+      input.value = String(input.max || 100);
+      applyMediaScaleFromSlider(input, true);
+    });
+
+    // ★ attrMetrics 側（指標比較テーブル）に表示されるスライダーでも同じ処理を行う
+    //   ※ attrMetrics はテーブルを再描画するので、親コンテナへのイベント委譲にしておく
+    const attrMetricsBox = $("attrMetrics");
+    if (attrMetricsBox) {
+      attrMetricsBox.addEventListener("input", (ev) => {
+        const el = ev.target;
+        if (!(el instanceof HTMLInputElement)) return;
+        if (!el.classList.contains("media-scale")) return;
+        applyMediaScaleFromSlider(el, false);
+      });
+
+      attrMetricsBox.addEventListener("change", (ev) => {
+        const el = ev.target;
+        if (!(el instanceof HTMLInputElement)) return;
+        if (!el.classList.contains("media-scale")) return;
+        applyMediaScaleFromSlider(el, true);
+      });
+
+      attrMetricsBox.addEventListener("dblclick", (ev) => {
+        const wrap = ev.target.closest(".media-scale-wrap");
+        if (!wrap) return;
+        const input = wrap.querySelector("input.media-scale");
+        if (!input || input.disabled) return;
+        input.value = String(input.max || 100);
+        applyMediaScaleFromSlider(input, true);
+      });
+    }
+
     $("mediaStats").addEventListener("click", (ev) => {
       // 1) まずはトグルボタンのクリックを優先処理
       const toggleBtn = ev.target.closest(".media-toggle");
+      if (ev.target.closest(".media-scale") || ev.target.closest(".media-scale-wrap")) {
+        return;
+      }
       if (toggleBtn) {
         const mediaName = toggleBtn.getAttribute("data-media-name");
         if (!mediaName) return;
@@ -5605,16 +8046,28 @@ ${Math.round(value).toLocaleString()}円（${(ratio*100).toFixed(1)}%）</title>
         mediaViewByName.set(mediaName, set);
       }
 
-      mediaViewSet = new Set(set);
-
-      viewMode = "media";
-      applyViewSelection();
-      updateAggregates();
-      updateViewStatus();
+      // ★ スライダー倍率に応じた「表示用セット」を作り、地図はその範囲で表示
+      runWithBusy(() => {
+        recomputeMediaDisplaySet(mediaName);
+        mediaViewSet = new Set(getMediaDisplaySet(mediaName));
+        viewMode = "media";
+        applyViewSelection();
+        updateAggregates();
+        updateViewStatus();
+      }, "ビュー更新中…");
     });
+
 
     document.getElementById("attrMetrics")?.addEventListener("change", (ev) => {
       const el = ev.target;
+
+      // ---- 部数調整スライダー（媒体行）----
+      if (el && el.classList && el.classList.contains("media-scale")) {
+        if (el instanceof HTMLInputElement) {
+          applyMediaScaleFromSlider(el, true);
+        }
+        return;
+      }
 
       // ---- ビュー切り替え（基準の町行＋媒体行）----
       if (el.classList.contains("attr-view-check")) {
@@ -5628,10 +8081,12 @@ ${Math.round(value).toLocaleString()}円（${(ratio*100).toFixed(1)}%）</title>
 
         if (scopeKind === "base") {
           // 基準ビューに戻す
-          viewMode = "base";
-          applyViewSelection();
-          updateAggregates();
-          updateViewStatus();
+          runWithBusy(() => {
+            viewMode = "base";
+            applyViewSelection();
+            updateAggregates();
+            updateViewStatus();
+          }, "ビュー更新中…");
           return;
         }
 
@@ -5651,12 +8106,14 @@ ${Math.round(value).toLocaleString()}円（${(ratio*100).toFixed(1)}%）</title>
             mediaViewByName.set(mediaName, set);
           }
 
-          mediaViewSet = new Set(set);
-          viewMode = "media";
-
-          applyViewSelection();
-          updateAggregates();
-          updateViewStatus();
+          runWithBusy(() => {
+            recomputeMediaDisplaySet(mediaName);
+            mediaViewSet = new Set(getMediaDisplaySet(mediaName));
+            viewMode = "media";
+            applyViewSelection();
+            updateAggregates();
+            updateViewStatus();
+          }, "ビュー更新中…");
           return;
         }
 
@@ -5670,6 +8127,16 @@ ${Math.round(value).toLocaleString()}円（${(ratio*100).toFixed(1)}%）</title>
         setMediaEnabled(mediaName, el.checked);
         return;
       }
+    });
+
+    // attrMetrics 側のスライダーも「ダブルクリックで100%」
+    document.getElementById("attrMetrics")?.addEventListener("dblclick", (ev) => {
+      const wrap = ev.target.closest(".media-scale-wrap");
+      if (!wrap) return;
+      const input = wrap.querySelector("input.media-scale");
+      if (!input || input.disabled) return;
+      input.value = String(input.max || 100);
+      applyMediaScaleFromSlider(input, true);
     });
 
 
