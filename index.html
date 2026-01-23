@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.6.0</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.0</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -3017,18 +3017,19 @@ function hideOverlayBusy(token){
     }
 
     function getUsedMediaCategories(){
+      // 「現在使っている媒体の組み合わせ」は、ゲージ0でも「チェックONなら使っている」とみなす
+      //（最適予算配分で 0→積み上げ対象に含めるため）
       const cats = new Set();
       if (!mediaCodesAllByName || !mediaCodesAllByName.size) return cats;
       for (const name of mediaCodesAllByName.keys()){
-        if (!isMediaEnabled(name)) continue;
-        const dispSet = getMediaDisplaySet(name);
-        if (!dispSet || dispSet.size === 0) continue;
+        if (!isMediaEnabled(name)) continue; // チェックONのみ
         const cat0 = mediaCategoryByName.get(name);
         const cat = normalizeTypeCategory(cat0);
         if (cat) cats.add(cat);
       }
       return cats;
     }
+
 
     function getTypeContrib(r){
       const v = (r && (r["貢献度"] ?? r["重み付き貢献度"] ?? r["重み付け貢献度"])) ?? 0;
@@ -4236,7 +4237,7 @@ if (!categories.size) {
       for (const code of targetCodes) {
         const codeStr = String(code);
         const townRow = townIndex.get(codeStr);
-        if (!townRow) continue; 
+        if (!townRow) continue;
 
         const hh = toNumber(townRow[HH_TOTAL_KEY] ?? 0);
         if (!hh) continue;
@@ -5955,18 +5956,31 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
         }
 
         // catState を構築（カテゴリ目標に達したら、そのカテゴリは終了）
-        const catState = new Map();
+        // ※ 現在の媒体構成に存在するカテゴリだけで再正規化して、総予算に対して配分が遠くならないようにする
+        const catEntries = [];
         for (const [cat, pct] of pctByCat.entries()){
           const list = (mediaByCatLocal.get(cat) || []).slice();
           if (!list.length) continue;
-
           const p = Math.max(0, Math.min(100, Number(pct)));
-          const tgt = Math.max(0, Math.round(totalBudget * (p / 100)));
-          catState.set(cat, { target: tgt, total: 0, medias: list, done: false });
+          catEntries.push({ cat, pct: p, medias: list });
         }
-        if (!catState.size) {
+        if (!catEntries.length) {
           if (msg) msg.innerHTML = "この配分に該当するカテゴリの媒体が現在の構成にありません。";
           return;
+        }
+
+        let sumPct = 0;
+        for (const e of catEntries) sumPct += e.pct;
+        if (!(sumPct > 0)) {
+          if (msg) msg.innerHTML = "この業態の予算配分が 0% のため、配分できません。";
+          return;
+        }
+
+        const catState = new Map();
+        for (const e of catEntries){
+          const pEff = e.pct / sumPct; // 再正規化
+          const tgt = Math.max(0, Math.round(totalBudget * pEff));
+          catState.set(e.cat, { target: tgt, total: 0, medias: e.medias, done: false });
         }
 
         if (isGoalLockOn()) {
@@ -6413,17 +6427,6 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
             codesForSum = new Set();
           }
 
-          // ★この媒体を「表示すべきか？」の判定
-          const mustShow =
-            baseMediaNames.has(name) ||          // 基準町に出ている媒体は常に表示
-            name === currentMediaName ||         // 現在選択中の媒体は常に表示
-            (codesForSum && codesForSum.size > 0); // それ以外は、集計対象があるときだけ表示
-
-          // 集計対象がなく、かつ表示義務もなければスキップ
-          if (!mustShow && (!codesForSum || codesForSum.size === 0)) {
-            continue;
-          }
-
           let stat = { 件数: 0, 部数: 0, 料金: 0 };
 
           // ★ codesForSum が空でも stat は 0 のまま → 行だけは表示される
@@ -6486,10 +6489,7 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
           const rowsHtml = sorted
             .map(([name, o, disp]) => {
             const enabled = isMediaEnabled(name);
-
-            // ★目標ロック中は「ロック対象以外の媒体は非表示」
             const params = getSliderParamsForMedia(name);
-            if (!params.show) return "";
 
             // ★表示値は「選択されている店CD（=表示セット）に含まれる分の合計」
             const adjN  = disp.件数;
@@ -7690,13 +7690,15 @@ function runWithBusy(runFn, msg="更新中…", delayMs = 0){
       const m = String(mediaName);
       const enabled = isMediaEnabled(m);
 
-      // 目標ロック中：この媒体がロック対象なら「店CD数」スライダー
+      // 目標ロック中：店CD数スライダー（除外中でも行は消さない）
       if (isGoalLockOn()) {
-        if (!GOAL_LOCK.activeMediaSet.has(m)) {
-          return { show: false };
-        }
+        const active = !!(GOAL_LOCK && GOAL_LOCK.activeMediaSet && GOAL_LOCK.activeMediaSet.has(m));
+        // 非アクティブでも maxCount が取れるように準備（失敗してもOK）
+        try { ensureGoalLockMediaPrepared(m); } catch(e) {}
+
         const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || 0));
-        const valCount = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+        const valCount0 = Math.max(0, Math.round(GOAL_LOCK.valueCountByMedia.get(m) || 0));
+        const valCount = active ? valCount0 : 0; // 除外中は 0 表示
         const v = Math.max(0, Math.min(valCount, maxCount));
         const pct = (maxCount > 0) ? Math.round((v / maxCount) * 100) : 0;
         return {
@@ -7707,9 +7709,10 @@ function runWithBusy(runFn, msg="更新中…", delayMs = 0){
           step: 1,
           value: v,
           pct,
-          disabled: !enabled
+          disabled: (!enabled) || (!active)
         };
       }
+
 
       // 通常：％スライダー（5%刻み）
       const scale = getMediaScale(m);
