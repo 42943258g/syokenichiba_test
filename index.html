@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.6.0</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.1</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -2935,7 +2935,6 @@ function hideOverlayBusy(token){
           const name  = normMediaName(r["媒体名"]); r["媒体名"] = name;
 
           let cat0 = String(r["分類"] ?? "").trim();
-          if (name.includes("折込プラス")) cat0 = "フリーペーパー";
           if (cat0 && !mediaCategoryByName.has(name)) mediaCategoryByName.set(name, cat0);
 
           // 町別 → 媒体行
@@ -2983,20 +2982,16 @@ function hideOverlayBusy(token){
 
     // ★ 業態マスタ読み込み（type_master_all.csv：媒体組み合わせ別対応）
     function normalizeTypeCategory(s){
+      // ★分類名の揺れ吸収はしない。
+      // ただし、type_master_all.csv 側の「媒体」列は「フリーペーパー/ポスティング/折込/web」なので、
+      // media_master.csv 側の分類コード（FP/ポス/折込/web）に“厳密に変換”して統一する（contains 等の曖昧処理は一切しない）
       const t = String(s ?? "").trim();
       if (!t) return "";
-      const lower = t.toLowerCase();
-
-      // ★重要：媒体名/分類の表記ゆれ吸収（分類列が優先）
-      if (t === "折込プラス" || t.includes("折込プラス")) return "フリーペーパー";
-
-      if (t === "FP" || t === "ＦＰ" || t.includes("フリペ")) return "フリーペーパー";
-      if (t === "ポス" || t.includes("ポスティ")) return "ポスティング";
-      if (t === "WEB" || t === "Web" || t === "ウェブ" || lower === "web") return "web";
-
-      // 「折込」カテゴリは “折込” そのもの（または明示的な折込系）だけを折込扱いにする
-      if (t === "折込" || t.startsWith("折込 ") || t.startsWith("折込　")) return "折込";
-
+      if (t === "フリーペーパー") return "FP";
+      if (t === "ポスティング") return "ポス";
+      if (t === "折込") return "折込";
+      if (t.toLowerCase() === "web") return "web";
+      // すでにコード側（FP/ポス/折込/web）が入っている場合はそのまま
       return t;
     }
     function normalizeInsideLabel(v){
