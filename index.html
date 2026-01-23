@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.0</strong></div>
+    <div><strong>商圏市場テスト ver.2.6.0</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -2934,7 +2934,8 @@ function hideOverlayBusy(token){
           const store = getStoreCdFromRow(r);
           const name  = normMediaName(r["媒体名"]); r["媒体名"] = name;
 
-          const cat0 = String(r["分類"] ?? "").trim();
+          let cat0 = String(r["分類"] ?? "").trim();
+          if (name.includes("折込プラス")) cat0 = "フリーペーパー";
           if (cat0 && !mediaCategoryByName.has(name)) mediaCategoryByName.set(name, cat0);
 
           // 町別 → 媒体行
@@ -2985,10 +2986,17 @@ function hideOverlayBusy(token){
       const t = String(s ?? "").trim();
       if (!t) return "";
       const lower = t.toLowerCase();
+
+      // ★重要：媒体名/分類の表記ゆれ吸収（分類列が優先）
+      if (t === "折込プラス" || t.includes("折込プラス")) return "フリーペーパー";
+
       if (t === "FP" || t === "ＦＰ" || t.includes("フリペ")) return "フリーペーパー";
       if (t === "ポス" || t.includes("ポスティ")) return "ポスティング";
       if (t === "WEB" || t === "Web" || t === "ウェブ" || lower === "web") return "web";
-      if (t.includes("折込")) return "折込";
+
+      // 「折込」カテゴリは “折込” そのもの（または明示的な折込系）だけを折込扱いにする
+      if (t === "折込" || t.startsWith("折込 ") || t.startsWith("折込　")) return "折込";
+
       return t;
     }
     function normalizeInsideLabel(v){
@@ -5956,7 +5964,7 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
         }
 
         // catState を構築（カテゴリ目標に達したら、そのカテゴリは終了）
-        // ※ 現在の媒体構成に存在するカテゴリだけで再正規化して、総予算に対して配分が遠くならないようにする
+        // ※ 配分%はCSVの全体比率をそのまま採用（存在しないカテゴリ分は未配分として残す）
         const catEntries = [];
         for (const [cat, pct] of pctByCat.entries()){
           const list = (mediaByCatLocal.get(cat) || []).slice();
@@ -5969,8 +5977,12 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
           return;
         }
 
+        // ★ここでは「再正規化」しない
+        // type_master_all.csv の配分%は「全体予算に対する比率」なので、
+        // 現在の構成に存在しないカテゴリがあっても、残りカテゴリに上乗せせず「未配分」として残す。
         let sumPct = 0;
         for (const e of catEntries) sumPct += e.pct;
+
         if (!(sumPct > 0)) {
           if (msg) msg.innerHTML = "この業態の予算配分が 0% のため、配分できません。";
           return;
@@ -5978,7 +5990,7 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
 
         const catState = new Map();
         for (const e of catEntries){
-          const pEff = e.pct / sumPct; // 再正規化
+          const pEff = Math.max(0, Math.min(1, e.pct / 100)); // CSVの%をそのまま使用
           const tgt = Math.max(0, Math.round(totalBudget * pEff));
           catState.set(e.cat, { target: tgt, total: 0, medias: e.medias, done: false });
         }
@@ -6121,7 +6133,20 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
         if (msg) {
           const cats = Array.from(pctByCat.keys()).join("+");
           const total10k = Math.round(totalBudget / 10000);
-          msg.innerHTML = `最適予算配分を適用しました：<b>${escHtml(cats)}</b> / 中心地: ${escHtml(inside)} / 予算: ${total10k.toLocaleString()} 万円`;
+          {
+            const parts = [];
+            // カテゴリ別の目標と実績を表示
+            const details = [];
+            for (const [cat, st] of catState.entries()){
+              const tgt10k = Math.round((st.target||0)/10000);
+              const act10k = Math.round((st.total||0)/10000);
+              details.push(`${cat}:${act10k}/${tgt10k}万円`);
+            }
+            const unalloc = Math.max(0, totalBudget - Array.from(catState.values()).reduce((a,s)=>a+(s.target||0),0));
+            const un10k = Math.round(unalloc/10000);
+            msg.innerHTML = `最適予算配分を適用しました：<b>${escHtml(cats)}</b> / 中心地: ${escHtml(inside)} / 予算: ${total10k.toLocaleString()} 万円` 
+              + `<br><span class="muted">カテゴリ別(実績/目標)：${escHtml(details.join(" / "))}${un10k>0?` / 未配分:${un10k.toLocaleString()}万円`:``}</span>`;
+          }
         }
       }, "最適予算配分を適用中…");
     });
