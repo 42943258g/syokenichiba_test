@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.1</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.2</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -1951,6 +1951,14 @@ function emphasizeOptimizeButtons(){
           for (const c of codes) {
             if (maxSet.has(String(c))) { out.add(String(a)); break; }
           }
+        }
+        // ★ エリアコードが実質1つしか無い媒体は、ゲージ増減の粒度が粗すぎて
+        //   予算配分（カテゴリ目標）に追従できない。
+        //   その場合は町コードを疑似エリア（TOWN:<code>）として扱い、町単位で増減できるようにする。
+        if (out.size <= 1 && maxSet && maxSet.size > 1) {
+          const townAreas = new Set();
+          for (const c of maxSet) townAreas.add(`TOWN:${String(c)}`);
+          return townAreas;
         }
         return out;
       }
@@ -5987,7 +5995,8 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
         for (const e of catEntries){
           const pEff = Math.max(0, Math.min(1, e.pct / 100)); // CSVの%をそのまま使用
           const tgt = Math.max(0, Math.round(totalBudget * pEff));
-          catState.set(e.cat, { target: tgt, total: 0, medias: e.medias, done: false });
+          // max: このカテゴリで物理的に積める上限（後で算出）
+          catState.set(e.cat, { target: tgt, total: 0, max: 0, medias: e.medias, done: false });
         }
 
         if (isGoalLockOn()) {
@@ -5998,6 +6007,19 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
           for (const m of enabledMedias){
             ensureGoalLockMediaPrepared(m);
             GOAL_LOCK.valueCountByMedia.set(m, 0); // ★毎回ゼロから
+          }
+
+          // ★カテゴリごとの「物理上限（max）」を算出（この上限を超える目標は達成不可）
+          for (const [cat, st] of catState.entries()) {
+            let maxCat = 0;
+            for (const m of st.medias) {
+              const gains = GOAL_LOCK.areaGainByMedia.get(m) || [];
+              const maxCount = Math.max(0, Math.round(GOAL_LOCK.maxCountByMedia.get(m) || gains.length || 0));
+              let sum = 0;
+              for (let i = 0; i < Math.min(maxCount, gains.length); i++) sum += toNumber(gains[i]?.yen || 0);
+              maxCat += sum;
+            }
+            st.max = Math.max(0, Math.round(maxCat));
           }
 
           let guard = 0;
@@ -6068,6 +6090,18 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
             yenByMediaArea.set(m, yenArr);
           }
 
+          // ★カテゴリごとの「物理上限（max）」を算出（この上限を超える目標は達成不可）
+          for (const [cat, st] of catState.entries()) {
+            let maxCat = 0;
+            for (const m of st.medias) {
+              const yenArr = yenByMediaArea.get(m) || [];
+              let sum = 0;
+              for (let i = 0; i < yenArr.length; i++) sum += toNumber(yenArr[i] || 0);
+              maxCat += sum;
+            }
+            st.max = Math.max(0, Math.round(maxCat));
+          }
+
           let guard = 0;
           while (guard < 500000){
             let progressed = false;
@@ -6135,7 +6169,9 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
             for (const [cat, st] of catState.entries()){
               const tgt10k = Math.round((st.target||0)/10000);
               const act10k = Math.round((st.total||0)/10000);
-              details.push(`${cat}:${act10k}/${tgt10k}万円`);
+              const max10k = Math.round((st.max||0)/10000);
+              const capped = (st.max>0 && st.target>st.max) ? "※上限" : "";
+              details.push(`${cat}:${act10k}/${tgt10k}万円(最大${max10k}万円)${capped}`);
             }
             const unalloc = Math.max(0, totalBudget - Array.from(catState.values()).reduce((a,s)=>a+(s.target||0),0));
             const un10k = Math.round(unalloc/10000);
