@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.2</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.3</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -5483,6 +5483,23 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
             break;
           }
 
+          // ★追加：目標到達なら即停止（媒体自動展開で合計が増えるため毎周「実合計」で判定）
+          if (targetYen > 0 || targetCopies > 0) {
+            const cur = getCurrentAllMediaTotals(); // ON媒体・倍率込みの実合計
+            totalYen = cur.yen;
+            totalCps = cur.cps;
+
+            if (targetYen > 0 && totalYen >= targetYen) {
+              stoppedBy = "yen";
+              break;
+            }
+            if (targetCopies > 0 && totalCps >= targetCopies) {
+              stoppedBy = "copies";
+              break;
+            }
+          }          
+
+
           // いまの frontier を構築
           const frontier = new Map();
           for (const base of order) {
@@ -5639,10 +5656,19 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
             { selected: true }
           );
           if (!seedLRU.has(best.code)) seedLRU.set(best.code, -1);
+
+          order = getInitialSeeds(allowedInRadius);
+
+
           autoExpandMediaFromBaseTown(String(best.code));
           refreshMediaDisplaysForTown(best.code);
 
-          order = getInitialSeeds(allowedInRadius);
+          // ★追加：媒体展開後の「実合計」で判定
+          if (targetYen > 0 || targetCopies > 0) {
+            const cur = getCurrentAllMediaTotals();
+            totalYen = cur.yen;
+            totalCps = cur.cps;
+          }
 
           // ★ ここで「追加後に超えたか」をチェック
           if (targetYen > 0 && totalYen >= targetYen) {
@@ -5653,6 +5679,7 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
             stoppedBy = "copies";
             break;
           }
+
 
           step++;
           if ((performance.now() - lastUiUpdate) >= AUTO_UI_INTERVAL_MS) {
