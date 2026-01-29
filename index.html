@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.3</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.4</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -5917,6 +5917,68 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
       return orderedAreas;
     }
 
+    function getOrderedAreasForMediaNormalWithKey(name, maxSet){
+      name = String(name);
+      const maxAreas = getMaxAreasForMedia(name, maxSet);
+
+      // baseSelectOrder 上で、その媒体の各エリアが「最初に出現した順番」を key にする
+      const keyMap = new Map(); // area -> baseSelectOrder index
+      for (let i=0; i<baseSelectOrder.length; i++){
+        const c = String(baseSelectOrder[i]);
+        if (!maxSet.has(c)) continue;
+        const rows = mediaIndex?.get(c) || [];
+        for (const r of rows){
+          const mm = r["媒体名"] ?? "";
+          if (String(mm) !== name) continue;
+          const a = String(getMediaAreaCodeFromRow(r, c));
+          if (!maxAreas.has(a)) continue;
+          if (!keyMap.has(a)) keyMap.set(a, i);
+        }
+      }
+
+      // 既存ロジックで orderedAreas を作る（媒体別順があればそれ優先、無ければbaseSelectOrder推定）
+      const orderArr = mediaAreaOrderByName.get(name) || [];
+      let orderedAreas = [];
+      if (orderArr.length) {
+        orderedAreas = orderArr.map(String).filter(a => maxAreas.has(a));
+      } else {
+        const tmp = [];
+        const seen = new Set();
+        for (const c0 of baseSelectOrder) {
+          const c = String(c0);
+          if (!maxSet.has(c)) continue;
+          const rows = mediaIndex?.get(c) || [];
+          for (const r of rows) {
+            const mm = r["媒体名"] ?? "(名称不明)";
+            if (String(mm) !== name) continue;
+            const a = String(getMediaAreaCodeFromRow(r, c));
+            if (!maxAreas.has(a)) continue;
+            if (seen.has(a)) continue;
+            seen.add(a);
+            tmp.push(a);
+          }
+        }
+        orderedAreas = tmp;
+      }
+
+      // 順序配列に無いエリアは末尾に補完
+      const setOrdered = new Set(orderedAreas);
+      for (const a of maxAreas) {
+        if (!setOrdered.has(a)) orderedAreas.push(String(a));
+      }
+
+      // {area, key, yen} の配列にする（keyが無いものは末尾扱い）
+      const seq = [];
+      for (let j=0; j<orderedAreas.length; j++){
+        const a = orderedAreas[j];
+        const key = keyMap.has(a) ? keyMap.get(a) : (1e12 + j); // base順に無いものは後ろ
+        const g = computeAreaGainForMedia(name, a, maxSet);
+        seq.push({ area: a, key, yen: toNumber(g?.yen || 0) });
+      }
+      return seq;
+    }
+
+
     function pickKeepNForTargetYenNormal(m, targetYen, orderedAreas, maxSet){
       const name = String(m);
       const len = (orderedAreas || []).length;
@@ -6095,86 +6157,80 @@ if (mediaIndex && codesForMedia && codesForMedia.length) {
           }
 
         } else {
-          // ===== 通常（％スライダー）：各媒体を 0 から同時に積み上げ、カテゴリ目標で停止 =====
-          // まず対象媒体を 0% に戻す（毎回ゼロから）
+          // ===== 通常（％スライダー）：各媒体を 0 から積み上げ、カテゴリ目標で停止 =====
           const keepNByMedia = new Map(); // m -> keepN(areas)
-          const areasByMedia = new Map(); // m -> orderedAreas[]
-          const yenByMediaArea = new Map(); // m -> yen array per area index
+          const seqByMedia = new Map();   // m -> [{area,key,yen}...]
 
           for (const m of enabledMedias){
             setMediaScale(m, 0);
             keepNByMedia.set(m, 0);
 
             const maxSet = getMaxCodesForMedia(m);
-            const orderedAreas = getOrderedAreasForMediaNormal(m, maxSet);
-            areasByMedia.set(m, orderedAreas);
-
-            const yenArr = [];
-            for (let i=0; i<orderedAreas.length; i++){
-              const g = computeAreaGainForMedia(m, orderedAreas[i], maxSet);
-              yenArr.push(toNumber(g?.yen || 0));
-            }
-            yenByMediaArea.set(m, yenArr);
+            const seq = getOrderedAreasForMediaNormalWithKey(m, maxSet);
+            seqByMedia.set(m, seq);
           }
 
-          // ★カテゴリごとの「物理上限（max）」を算出（この上限を超える目標は達成不可）
+          // ★カテゴリごとの「物理上限（max）」を算出
           for (const [cat, st] of catState.entries()) {
             let maxCat = 0;
             for (const m of st.medias) {
-              const yenArr = yenByMediaArea.get(m) || [];
+              const seq = seqByMedia.get(m) || [];
               let sum = 0;
-              for (let i = 0; i < yenArr.length; i++) sum += toNumber(yenArr[i] || 0);
+              for (const it of seq) sum += toNumber(it.yen || 0);
               maxCat += sum;
             }
             st.max = Math.max(0, Math.round(maxCat));
           }
 
-          let guard = 0;
-          while (guard < 500000){
-            let progressed = false;
-            let anyOpen = false;
+          // カテゴリごとに「町順キー」でマージしながら拾う
+          for (const [cat, st] of catState.entries()){
+            st.total = 0;
+            st.done = false;
 
-            for (const [cat, st] of catState.entries()){
-              if (st.done) continue;
-              anyOpen = true;
+            if (st.target <= 0) { st.done = true; continue; }
 
-              if (st.target <= 0 || st.total >= st.target) {
-                st.done = true;
-                continue;
-              }
+            const idxByMedia = new Map();
+            for (const m of st.medias) idxByMedia.set(m, 0);
 
-              let catProgress = false;
+            while (st.total < st.target){
+              let bestM = null;
+              let bestKey = Infinity;
+
               for (const m of st.medias){
-                if (st.total >= st.target) { st.done = true; break; }
-
-                const orderedAreas = areasByMedia.get(m) || [];
-                const v = keepNByMedia.get(m) || 0;
-                if (v >= orderedAreas.length) continue;
-
-                const add = (yenByMediaArea.get(m) || [])[v] || 0;
-                keepNByMedia.set(m, v + 1);
-                st.total += add;
-
-                progressed = true;
-                catProgress = true;
+                const seq = seqByMedia.get(m) || [];
+                const idx = idxByMedia.get(m) || 0;
+                if (idx >= seq.length) continue;
+                const key = seq[idx].key;
+                if (key < bestKey){
+                  bestKey = key;
+                  bestM = m;
+                }
               }
 
-              if (!st.done && !catProgress) st.done = true;
+              if (!bestM) break; // これ以上積めない
+
+              const seq = seqByMedia.get(bestM) || [];
+              const idx = idxByMedia.get(bestM) || 0;
+              const add = toNumber(seq[idx]?.yen || 0);
+
+              idxByMedia.set(bestM, idx + 1);
+              keepNByMedia.set(bestM, (keepNByMedia.get(bestM) || 0) + 1);
+              st.total += add;
             }
 
-            if (!anyOpen || !progressed) break;
-            guard++;
+            st.done = true;
           }
 
           // スライダー（％）に反映
           for (const m of enabledMedias){
-            const orderedAreas = areasByMedia.get(m) || [];
+            const seq = seqByMedia.get(m) || [];
             const keepN = Math.max(0, Math.round(keepNByMedia.get(m) || 0));
-            const scale = orderedAreas.length ? (keepN / orderedAreas.length) : 0;
+            const scale = seq.length ? (keepN / seq.length) : 0;
             setMediaScale(m, Math.max(0, Math.min(1, scale)));
             recomputeMediaDisplaySet(m);
             updateSliderUIForMedia(m);
           }
+
         }
 
         // 媒体ビュー中なら、表示している媒体のセットを同期（地図更新）
