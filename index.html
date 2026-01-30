@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.7</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.8</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -1723,6 +1723,18 @@ function emphasizeOptimizeButtons(){
 
         const universeAreas = getMaxAreasForMedia(m, universe);
         if (!universeAreas || !universeAreas.size) continue;
+
+        // prefix は「目標到達時点で取れていたエリア」：そのまま先頭固定
+        const orderedAreas = [];
+        const orderedAreaSet = new Set();
+        for (const a0 of prefix) {
+          const a = String(a0);
+          if (!universeAreas.has(a)) continue;
+          if (orderedAreaSet.has(a)) continue;
+          orderedAreas.push(a);
+          orderedAreaSet.add(a);
+        }
+
 
         // === ここから差し替え：目標達成後も「町の追加順」で店CD(エリア)順を作る ===
 
