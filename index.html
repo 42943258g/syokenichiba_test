@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.8</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.9</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -1685,30 +1685,48 @@ function emphasizeOptimizeButtons(){
       for (const [name] of mediaCodesAllByName.entries()) {
         const m = String(name);
 
-        // ★ 目標到達時点の「その媒体が実際に取れていた分」（prefix）を先頭に置く
-        const currentMaxSet = getMaxCodesForMedia(m); // 選択済み ∩ 媒体
+        const currentMaxSet = getMaxCodesForMedia(m);
         const currentAreas = getMaxAreasForMedia(m, currentMaxSet);
-        const orderArr = (mediaAreaOrderByName.get(m) || []).map(String);
-        let prefix = orderArr.filter(a => currentAreas.has(a));
-        if (!prefix.length && currentAreas && currentAreas.size) {
-          const tmp = [];
-          const seen = new Set();
+
+        const isTownAreaMode = (() => {
+          for (const a of currentAreas) if (String(a).startsWith("TOWN:")) return true;
+          return false;
+        })();
+
+        let prefix = [];
+        if (isTownAreaMode) {
+          // ★ TOWN: のときは「町の追加順」で prefix を作る（順序が目的）
           for (const c0 of (GOAL_LOCK.baseTownOrderAtGoal || [])) {
             const code = String(c0);
             if (!currentMaxSet.has(code)) continue;
-            const rowsForTown = mediaIndex?.get(code) || [];
-            for (const r of rowsForTown) {
-              const mm = r["媒体名"] ?? "(名称不明)";
-              if (String(mm) !== m) continue;
-              const a = getMediaAreaCodeFromRow(r, code);
-              if (!currentAreas.has(String(a))) continue;
-              if (seen.has(String(a))) continue;
-              seen.add(String(a));
-              tmp.push(String(a));
-            }
+            prefix.push(`TOWN:${code}`);
           }
-          prefix = tmp.length ? tmp : Array.from(currentAreas).map(String);
+          if (!prefix.length) prefix = Array.from(currentAreas).map(String);
+        } else {
+          const orderArr = (mediaAreaOrderByName.get(m) || []).map(String);
+          prefix = orderArr.filter(a => currentAreas.has(a));
+
+          if (!prefix.length && currentAreas && currentAreas.size) {
+            const tmp = [];
+            const seen = new Set();
+            for (const c0 of (GOAL_LOCK.baseTownOrderAtGoal || [])) {
+              const code = String(c0);
+              if (!currentMaxSet.has(code)) continue;
+              const rowsForTown = mediaIndex?.get(code) || [];
+              for (const r of rowsForTown) {
+                const mm = r["媒体名"] ?? "(名称不明)";
+                if (String(mm) !== m) continue;
+                const a = getMediaAreaCodeFromRow(r, code);
+                if (!currentAreas.has(String(a))) continue;
+                if (seen.has(String(a))) continue;
+                seen.add(String(a));
+                tmp.push(String(a));
+              }
+            }
+            prefix = tmp.length ? tmp : Array.from(currentAreas).map(String);
+          }
         }
+
         const prefixSet = new Set(prefix);
 
         // ★ B：ロック時の maxSet は “媒体の全域”（＝CSVで取得できた店CD）
@@ -1849,11 +1867,16 @@ function emphasizeOptimizeButtons(){
           if (hit) { need = i + 1; break; }
         }
 
-        const maxCount = Math.max(1, Math.min(need, gains.length));
+        let maxCount = Math.max(1, Math.min(need, gains.length));
+
+        // ★ 100%（maxCount）は「目標到達時点（prefix）」より小さくなってはいけない
+        //   小さいと initVal が maxCount に潰れて “全部100%” になる
+        maxCount = Math.max(maxCount, prefix.length);
 
         // 目標到達時点のゲージ位置（＝その時点で取得できていた prefix 分）に戻す
         const currentCount = prefix.length;
-        const initVal = Math.max(0, Math.min(currentCount, maxCount));
+        const initVal = Math.max(0, Math.min(currentCount, maxCount)); // ← もう潰れない
+
 
         GOAL_LOCK.activeMediaSet.add(m);
         GOAL_LOCK.areaOrderByMedia.set(m, orderedFiltered);
