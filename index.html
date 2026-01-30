@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.5</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.6</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -1974,36 +1974,25 @@ function emphasizeOptimizeButtons(){
     }
 
     
-    // ★ 目標ロック用：媒体の「最大集合（universe）」が未生成/空なら、その場で作る（半径制約も反映）
-    // ★ ただし buildGoalLockFromCurrentSelection() が作った universe が既にあれば “絶対に上書きしない”
-    function ensureGoalLockUniverse(mediaName){
+    function ensureGoalLockUniverse(mediaName) {
+      if (!GOAL_LOCK) return null;
+
       const m = String(mediaName);
-      if (!isGoalLockOn() || !GOAL_LOCK) return null;
 
       // 念のため
       if (!GOAL_LOCK.maxSetByMedia) GOAL_LOCK.maxSetByMedia = new Map();
-
-      // ★ buildGoalLockFromCurrentSelection() が既に入れた universe を最優先で返す（上書き禁止）
-      const existing = GOAL_LOCK.maxSetByMedia.get(m);
-      if (existing && existing.size) {
-        if (!GOAL_LOCK._universeReadyByMedia) GOAL_LOCK._universeReadyByMedia = new Set();
-        GOAL_LOCK._universeReadyByMedia.add(m);
-        return existing;
-      }
-
-      // ---- 以降は「媒体全候補（＋半径）」を1回だけ生成してキャッシュ ----
       if (!GOAL_LOCK._universeReadyByMedia) GOAL_LOCK._universeReadyByMedia = new Set();
 
-      // ready ならキャッシュを返す
+      // ★「媒体全域＋半径」の universe を“作成済み”のときだけキャッシュを返す
       if (GOAL_LOCK._universeReadyByMedia.has(m)) {
         const cached = GOAL_LOCK.maxSetByMedia.get(m);
         if (cached && cached.size) return cached;
       }
 
+      // ---- ここから「媒体の全候補（＋半径制約）」を生成してキャッシュ ----
       const allCodes = mediaCodesAllByName?.get(m);
       if (!allCodes || !allCodes.size) return null;
 
-      // 距離（半径）制約
       const targetDist = Math.round(toNumber($("distInput")?.value) * 1000);
       const centerForRadius =
         centroidOf(baseCode || "") ??
@@ -2029,7 +2018,6 @@ function emphasizeOptimizeButtons(){
       }
       return null;
     }
-
 
 
 
