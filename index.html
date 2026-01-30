@@ -685,7 +685,7 @@
   </div>
 
   <div class="panel">
-    <div><strong>商圏市場テスト ver.2.7.6</strong></div>
+    <div><strong>商圏市場テスト ver.2.7.7</strong></div>
 
     <!-- ★ 提案レポート用ヘッダ＋出力（折りたたみボックス） -->
     <details id="reportHeaderBlock" class="section-block">
@@ -1638,6 +1638,50 @@ function emphasizeOptimizeButtons(){
         return { score, railMin };
       }
 
+      // ===== 目標到達後も「町を選ぶ順」を同じ考え方で延長したリストを作る =====
+      const originForOrder =
+        centroidOf(baseCode||"") ??
+        lastClickLngLat ??
+        getMapCenterLngLat();
+
+      // baseTownOrderAtGoal（=到達時点までの町順）を先頭に固定
+      const baseTownSet = new Set((GOAL_LOCK.baseTownOrderAtGoal || []).map(String));
+
+      // 到達後に追加される想定の町を「距離/路線/属性」の優先で並べる（町スコア）
+      const tailTowns = [];
+      for (const f of allFeatures) {
+        const code = String(f.code);
+        if (baseTownSet.has(code)) continue;
+        if (!inRadiusFast(code)) continue;
+
+        const p = PRE?.get(code);
+        const cent = p?.centroid || centroidOf(code);
+        const d = (originForOrder && cent) ? distMeters(originForOrder, cent) : Infinity;
+
+        const sc = townScoreObj(code); // {score, railMin}
+        tailTowns.push({ code, d, score: sc.score, railMin: sc.railMin });
+      }
+
+      tailTowns.sort((a,b)=>{
+        // 路線選択中：駅に近い町を優先
+        if (railOn && a.railMin !== b.railMin) return a.railMin - b.railMin;
+
+        // 属性優先：スコア高い町を優先（同点は近い順）
+        if (attrKeys && attrKeys.length && b.score !== a.score) return b.score - a.score;
+
+        // 距離優先：近い町を優先
+        if (a.d !== b.d) return a.d - b.d;
+
+        return a.code.localeCompare(b.code, 'ja');
+      });
+
+      // これが「到達後も同じ考え方で町を選ぶ」順番
+      const townOrderFull = [
+        ...(GOAL_LOCK.baseTownOrderAtGoal || []).map(String),
+        ...tailTowns.map(x => x.code),
+      ];
+
+
       for (const [name] of mediaCodesAllByName.entries()) {
         const m = String(name);
 
@@ -1800,7 +1844,7 @@ function emphasizeOptimizeButtons(){
         const initVal = Math.max(0, Math.min(currentCount, maxCount));
 
         GOAL_LOCK.activeMediaSet.add(m);
-        GOAL_LOCK.areaOrderByMedia.set(m, ordered);
+        GOAL_LOCK.areaOrderByMedia.set(m, orderedFiltered);
         GOAL_LOCK.areaGainByMedia.set(m, gains);
         GOAL_LOCK.maxCountByMedia.set(m, maxCount);
         GOAL_LOCK.valueCountByMedia.set(m, initVal);
@@ -1974,22 +2018,14 @@ function emphasizeOptimizeButtons(){
     }
 
     
-    function ensureGoalLockUniverse(mediaName) {
+    function ensureGoalLockUniverse(mediaName){
+      const m = String(mediaName);
       if (!GOAL_LOCK) return null;
 
-      const m = String(mediaName);
+      // ★ buildGoalLockFromCurrentSelection が作った universe を最優先（上書き禁止）
+      const already = GOAL_LOCK.maxSetByMedia?.get(m);
+      if (already && already.size) return already;
 
-      // 念のため
-      if (!GOAL_LOCK.maxSetByMedia) GOAL_LOCK.maxSetByMedia = new Map();
-      if (!GOAL_LOCK._universeReadyByMedia) GOAL_LOCK._universeReadyByMedia = new Set();
-
-      // ★「媒体全域＋半径」の universe を“作成済み”のときだけキャッシュを返す
-      if (GOAL_LOCK._universeReadyByMedia.has(m)) {
-        const cached = GOAL_LOCK.maxSetByMedia.get(m);
-        if (cached && cached.size) return cached;
-      }
-
-      // ---- ここから「媒体の全候補（＋半径制約）」を生成してキャッシュ ----
       const allCodes = mediaCodesAllByName?.get(m);
       if (!allCodes || !allCodes.size) return null;
 
@@ -2011,12 +2047,11 @@ function emphasizeOptimizeButtons(){
         for (const c0 of allCodes) out.add(String(c0));
       }
 
-      if (out.size) {
-        GOAL_LOCK.maxSetByMedia.set(m, out);
-        GOAL_LOCK._universeReadyByMedia.add(m);
-        return out;
-      }
-      return null;
+      if (!out.size) return null;
+
+      // ★ここで初めてキャッシュ（以後は上書きしない）
+      try { GOAL_LOCK.maxSetByMedia.set(m, out); } catch(e) {}
+      return out;
     }
 
 
